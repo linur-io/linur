@@ -1,0 +1,206 @@
+# linur — Linux 0.11 对齐清单（v1.0 契约）
+> 本文档是英文文件 `docs/spec/03-parity-checklist.md` 的简体中文译本；两者若有冲突，以英文版为准。
+
+状态：draft v0.2。本文件在 M1 启动**之前**写成，并在每个里程碑门禁处更新。
+
+## 使用方式
+
+每一行最终都必须恰好是下列状态之一：
+
+| 状态 | 含义 |
+|---|---|
+| `TODO` | 尚未开始；已指明所属里程碑 |
+| `WIP M# → DONE M#` | 目前部分存在，正在补齐到规格要求；并指明把该行翻成 DONE 的里程碑 |
+| `DONE` | 已实现、已由门禁测试、并留有证据 |
+| `DELTA F#` | 有意与 0.11 不同；原因见 `spec/01` §5 中的保真度差异编号 |
+| `DEFER` | 不在 v1.0 范围内，并给出了原因 |
+
+**当两种架构上都不存在处于 TODO 或 WIP 的行，且每一行 DELTA 和 DEFER 都带有原因时，即达到 v1.0。** 负责人会在每个里程碑门禁处审查本文件。
+
+## 1. 启动与机器
+
+| 条目 | Linux 0.11 | linur 目标 | 状态 |
+|---|---|---|---|
+| 启动扇区阶段 | `bootsect.s`，恰好 512 B，加载 4 个扇区 | 自有的 x86_64 加载器，不受 512 字节约束 | TODO M5.4 |
+| 机器设置 | `setup.s` 实模式：视频参数、内存大小、搬运内核镜像、GDT/IDT、CR0.PE | 长模式入口、内存探测、GDT/IDT/TSS | TODO M5.4（长模式入口由 M1.5 冒烟级别 bring-up（最小启动验证）部分覆盖） |
+| 内存上限 | 16 MiB 物理内存上限 | 没有人为上限 | DELTA F4 |
+| 任务上限 | `NR_TASKS` 64 | 没有人为上限 | DELTA F4 |
+| 第二种架构 | 无（只有 i386） | x86_64 旗舰 + riscv64 移植，两者 CI 均绿 | TODO M5.4 |
+| 启动路径的归属 | 自包含的汇编，自举 | 启动路径中没有随仓库携带的第三方二进制 | TODO M5.5 |
+
+## 2. 内存
+
+| 条目 | Linux 0.11 | linur 目标 | 状态 |
+|---|---|---|---|
+| 页帧分配器 | `mem_map[]` 字节数组，反向扫描 | 自有的分配器，用 C 编写（D8） | TODO M2.6 |
+| 地址转换 | 分段 + 分页，每个任务一个 LDT，64 MiB 窗口 | 按架构的页表式虚拟内存 | DELTA F3 |
+| 写时复制（COW） | `copy_page_tables` 清除写位；`un_wp_page` | COW 的 `fork` | TODO M4.1 |
+| 按需分页 | `do_no_page`，从可执行文件取页 | 按需分页 + 页缓存 | TODO M4.2 |
+| 共享的可执行页 | `share_page` / `try_to_share` | 共享页 | TODO M4.3 |
+| 堆增长 | `sys_brk` 移动一个末端指针，页由缺页调入 | `brk`，用户可见行为相同 | TODO M4.3（`brk` 于 M2.1 先行重新落地） |
+| `mmap` | **无** | 提供（L4 形态的 ABI 与现代用户态都需要它） | DELTA F1 |
+| 内存耗尽 | `oom()` 杀死一个任务或 panic | 带记账的显式策略 | TODO M4.4 |
+
+## 3. 进程
+
+| 条目 | Linux 0.11 | linur 目标 | 状态 |
+|---|---|---|---|
+| 进程表 | `task[]` 数组，下标 0 是空闲任务 | 用户可见行为相同 | TODO M3.5（随会话/进程组齐备） |
+| 状态 | RUNNING / INTERRUPTIBLE / UNINTERRUPTIBLE / ZOMBIE / STOPPED | 同样的五种状态 | WIP M1.3 → DONE M1.3 |
+| `fork` | COW，子进程返回 0 | 相同，采用 COW | TODO M4.1 |
+| `execve` | 仅 a.out ZMAGIC，支持 shebang，argv/envp | ELF、shebang、`envp` | DELTA F2 |
+| `exit` / `waitpid` | 重新挂到 init 之下，选项 WNOHANG/WUNTRACED，cutime/cstime | 语义相同，默认阻塞 | WIP M1.3 → DONE M6.1 |
+| 会话与进程组 | `pgrp`、`session`、`leader`、`setsid`、控制 tty | 相同 | TODO M3.5 |
+| 记账 | utime / stime / cutime / cstime | 相同 | TODO M3.5 |
+| 调度器 | 计数器 + 优先级补充，只在用户态抢占 | 公平的抢占式调度器；具体算法可以不同（F14） | WIP → DONE M2.1（stride 重新落地即最终调度器） |
+| 线程 | **无** | 通过保留的 rCore 系统调用 1000–1032 提供，直到 `clone`/`futex` 落地 | DELTA F5 |
+
+## 4. 信号
+
+| 条目 | Linux 0.11 | linur 目标 | 状态 |
+|---|---|---|---|
+| 编号 | 1–22，`_NSIG` 32 | 编号相同 | TODO M3.2 |
+| 投递 | 用户栈上的帧，带 restorer，发生在返回用户态的路径上 | 相同的机制 | TODO M3.2 |
+| 屏蔽 | `blocked` 字；SIGKILL 与 SIGSTOP 不可屏蔽 | 相同 | TODO M3.2 |
+| API | `signal`、`sigaction`、`sgetmask`、`ssetmask` | 名称与语义相同 | TODO M3.2 |
+| 默认动作 | SIGCHLD 忽略，其余按信号位作为退出码终止 | 相同 | TODO M3.2 |
+| 作业控制 | **无**（^Z 已定义但从未接入） | v1.0 不提供 | DEFER：0.11 里也没有 |
+
+## 5. 文件系统
+
+| 条目 | Linux 0.11 | linur 目标 | 状态 |
+|---|---|---|---|
+| VFS 层 | 针对 inode 模式位的固定 switch 语句 | 真正的 inode/dentry/superblock 对象 | TODO M2.2 |
+| 路径 | 逐分量遍历，没有 MAX_PATH 检查 | 支持 dot、dotdot、cwd 的遍历器 | TODO M2.2 |
+| 名称长度 | 14 个字符 | 长文件名 | DELTA F11 |
+| 磁盘格式 | MINIX v1，1 KiB 块，32 字节 inode，7+1+1 个区 | 沿 easy-fs 一脉的自有格式 | DELTA F12 |
+| 缓冲区缓存 | 哈希队列 + 空闲链表，预读，电梯 | 哈希队列，延迟写，`sync` | TODO M2.4 |
+| 挂载 | 8 项的表，仅 MINIX，没有文件系统类型参数 | 挂载表，至少一种文件系统 | TODO M2.3 |
+| 权限 | owner/group/other、`suser()`、`chmod`、`chown`、`umask` | 相同 | TODO M2.3 |
+| fd 表 | `NR_OPEN` 20，全局文件表 64 | 没有人为上限 | DELTA F4 |
+| 管道 | 管道 inode，一页，无读者时 `SIGPIPE` | 相同，带 `SIGPIPE` | TODO M6.2 |
+| 设备节点 | `/dev/null`、`/dev/port` 为真实设备；mem 设备返回 EIO | 相同，行为诚实 | TODO M6.2 |
+| 文件系统调用 | stat, fstat, lseek, dup, dup2, link, unlink, mkdir, rmdir, mknod, chmod, chown, utime, access, umask, sync, truncate | 全部提供 | TODO M2.1–M2.3, M6.1 |
+| `ioctl` / `fcntl` | tty ioctl 与终端线路设置；部分实现的 `fcntl` | 相同的子集 | TODO M6.1 |
+| 符号链接、`/proc` | 无 | v1.0 不提供 | DEFER |
+
+## 6. 设备与驱动
+
+| 条目 | Linux 0.11 | linur 目标 | 状态 |
+|---|---|---|---|
+| 控制台 | VGA/CGA/MDA 文本，ANSI 解析器，80x25，滚动，蜂鸣器 | 带 ANSI 的 VGA 文本控制台 | TODO M3.4 |
+| 键盘 | PS/2 扫描码集 1，修饰键，功能键，ctrl-alt-del | 相同的核心行为 | TODO M3.4 |
+| 串口 | 8250，固定 2400 bps，两个端口 | 自有的 UART 驱动，可用的速率 | TODO M3.1 |
+| 定时器 | 8253/8254，HZ 100，LATCH 11931 | 相同的 tick 速率；自有的 PIT/HPET 驱动 | TODO M5.4 |
+| 中断控制器 | 8259 主片 + 从片，显式 EOI | 自有的 PIC 或 APIC 处理 | TODO M5.4 |
+| 块设备 | 软盘 + ST-506/ATA，CHS，请求电梯 | 自有的带请求队列的驱动 | TODO M2.4 |
+| 软盘 | 完整的 FDC + DMA 驱动 | 不提供 | DEFER：博物馆里的硬件，对用户没有价值 |
+| ramdisk | 可选，默认关闭 | v1.0 不提供 | DEFER |
+| 设备层 | major/minor 分发表 | 相同的形态 | TODO M3.1 |
+
+## 7. 时间
+
+| 条目 | Linux 0.11 | linur 目标 | 状态 |
+|---|---|---|---|
+| tick | HZ 100，`jiffies` | HZ 100，`jiffies` | WIP M1.3 → DONE M1.3 |
+| 墙上时钟（x86_64） | 启动时读一次 RTC，之后会漂移 | 自建 CMOS RTC 驱动；时钟不漂移 | DELTA F13 |
+| 墙上时钟（riscv64） | 启动时读一次 RTC，之后会漂移 | QEMU `virt` 上没有 RTC 硬件：`stime` 设定的启动纪元 + jiffies | DELTA F13 |
+| `time` / `stime` / `times` | 自 epoch 起的秒数；jiffies；四个计数器 | 相同 | TODO M3.5（`times` 在 M6.1） |
+| `alarm` / `pause` | 单个闹钟，可中断的 pause | 相同 | TODO M3.5 |
+| `setitimer` / `gettimeofday` | 无 | v1.0 不提供 | DEFER |
+
+## 8. 系统调用覆盖
+
+0.11 定义了 **72 个条目，编号 0–71**，其中 **13 个是 `-ENOSYS` 桩**（17, 26, 31, 32, 35, 38, 44, 51, 52, 53, 56, 58, 62）。linur 对未实现的编号返回 `ENOSYS`，这与那些桩一致；已实现的 59 个调用在下表中跟踪。
+
+| # | 系统调用 | linur 状态 |
+|---|---|---|
+| 0 | `setup` | DEFER：0.11 启动序列的启动期产物，不是用户可见的调用 |
+| 1 | `exit` | WIP M1.3 → DONE M1.3 |
+| 2 | `fork` | WIP M1.3 → DONE M4.1（COW） |
+| 3 | `read` | WIP M1.3 → DONE M1.3（errno 语义） |
+| 4 | `write` | WIP M1.3 → DONE M1.3（errno 语义） |
+| 5 | `open` | WIP M1.3 → DONE M2.2（Linux 的标志值） |
+| 6 | `close` | WIP M1.3 → DONE M1.3 |
+| 7 | `waitpid` | WIP M1.3 → DONE M6.1（M1.3 起阻塞；选项在 M6.1） |
+| 8 | `creat` | TODO M2.2 |
+| 9 | `link` | TODO M2.2 |
+| 10 | `unlink` | TODO M2.2 |
+| 11 | `execve` | WIP M1.3 → DONE M2.5（envp 与 shebang） |
+| 12 | `chdir` | TODO M2.2 |
+| 13 | `time` | WIP M1.3 → DONE M3.5：目前返回单调毫秒；必须返回墙上时钟的秒数 |
+| 14 | `mknod` | TODO M2.2 |
+| 15 | `chmod` | TODO M2.3 |
+| 16 | `chown` | TODO M2.3 |
+| 18 | `stat` | TODO M2.2 |
+| 19 | `lseek` | TODO M2.2 |
+| 20 | `getpid` | WIP M1.3 → DONE M1.3 |
+| 21 | `mount` | TODO M6.1 |
+| 22 | `umount` | TODO M6.1 |
+| 23 | `setuid` | TODO M6.1 |
+| 24 | `getuid` | TODO M6.1 |
+| 25 | `stime` | TODO M3.5 |
+| 27 | `alarm` | TODO M3.5 |
+| 28 | `fstat` | TODO M2.2 |
+| 29 | `pause` | TODO M3.5 |
+| 30 | `utime` | TODO M3.5 |
+| 33 | `access` | TODO M2.3 |
+| 34 | `nice` | TODO M3.5 |
+| 36 | `sync` | TODO M6.1（缓存刷新在 M2.4 已有） |
+| 37 | `kill` | WIP M1.3 → DONE M3.5：目前是五位掩码；必须接受真正的信号编号（M3.2）并支持进程组（M3.5） |
+| 39 | `mkdir` | TODO M2.2 |
+| 40 | `rmdir` | TODO M2.2 |
+| 41 | `dup` | WIP M1.3 → DONE M1.3 |
+| 42 | `pipe` | WIP M1.3 → DONE M1.3 |
+| 43 | `times` | TODO M3.5 |
+| 45 | `brk` | TODO M2.1 |
+| 46 | `setgid` | TODO M6.1 |
+| 47 | `getgid` | TODO M6.1 |
+| 48 | `signal` | TODO M3.2 |
+| 49 | `geteuid` | TODO M6.1 |
+| 50 | `getegid` | TODO M6.1 |
+| 54 | `ioctl` | TODO M6.1 |
+| 55 | `fcntl` | TODO M6.1 |
+| 57 | `setpgid` | TODO M3.5 |
+| 59 | `uname` | TODO M6.1 |
+| 60 | `umask` | TODO M2.3 |
+| 61 | `chroot` | TODO M6.1 |
+| 63 | `dup2` | TODO M2.1 |
+| 64 | `getppid` | TODO M3.5 |
+| 65 | `getpgrp` | TODO M3.5 |
+| 66 | `setsid` | TODO M3.5 |
+| 67 | `sigaction` | TODO M3.2 |
+| 68 | `sgetmask` | TODO M3.2 |
+| 69 | `ssetmask` | TODO M3.2 |
+| 70 | `setreuid` | TODO M6.1 |
+| 71 | `setregid` | TODO M6.1 |
+
+linur 有而 0.11 没有的调用：线程与同步调用集（1000–1032）以及实验用的调用。它们记录在 `spec/01` §4 中，属于有意为之的扩展，不构成对齐缺口。
+
+## 9. 用户态与工具链
+
+| 条目 | Linux 0.11 | linur 目标 | 状态 |
+|---|---|---|---|
+| libc | 内核树之外的一个小型静态 libc | 我们自己的 libc，位于 `user/` | WIP M3.3 → DONE M3.3 |
+| shell | 由 `init` exec 的 `/bin/sh`（rc） | 我们自己的 shell | TODO M3.3 |
+| coreutils | 取决于发行版（ls, cat, cp, rm, mkdir, mount, ps…） | 一个小集合：ls、cat、cd、mkdir、rm、ln、ps、echo | TODO M3.3 |
+| 可执行文件格式 | a.out ZMAGIC，仅静态 | ELF，仅静态 | DELTA F2 |
+| 共享库 | 无 | v1.0 不提供 | DEFER |
+| init | 先跑 `/etc/rc`，再跑 `/bin/sh` | 相同的形态 | TODO M3.3 |
+
+## 10. 配置与测试
+
+| 条目 | Linux 0.11 | linur 目标 | 状态 |
+|---|---|---|---|
+| 配置 | Makefile 加 `config.h` | `config/<board>.toml` → 生成的常量 | DELTA F8, TODO M5.1 |
+| 测试套件 | 源码树里没有 | `just verify` + 宿主机测试 + 用户态套件 | TODO M1.4 |
+| CI | 无 | 每个里程碑门禁，两种架构 | TODO M1.4（自 M5.4 起覆盖两种架构） |
+| 对齐证据 | — | 本文件，在每个门禁处更新 | WIP → DONE M6.4 |
+
+## 11. 差异登记表
+
+`spec/01` §5 载有叙述和原因（F1–F14）。只在本清单中出现的额外差异现已在其中预留编号：F11 用长文件名代替 14 个字符、F12 沿 easy-fs 源流的自有磁盘格式、F13 不漂移的墙上时钟（x86_64 自建 CMOS RTC；riscv64 为架构范围偏离）、F14 未指明但公平的调度器。没有人为的任务/文件描述符上限仍由 F4 覆盖。
+
+## 12. 签署确认
+
+里程碑门禁会用状态和证据（测试名、产物或提交）更新受影响的那些行。只有当两种架构上每一行都是带原因的 DONE、DELTA 或 DEFER 时，v1.0 才会被打上标签。
