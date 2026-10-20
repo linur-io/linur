@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use crate::fs::{OpenFlags, make_pipe, open_file};
 use crate::mm::{UserBuffer, translated_byte_buffer, translated_refmut, translated_str};
 use crate::task::{current_process, current_user_token};

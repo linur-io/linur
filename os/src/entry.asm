@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
     .section .text.entry
     .globl _start
 _start:

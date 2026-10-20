@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //!An easy file system isolated from the kernel
 #![no_std]
 #![deny(missing_docs)]

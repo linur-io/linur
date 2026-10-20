@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
 /// A bitmap block

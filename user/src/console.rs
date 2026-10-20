@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use core::fmt::{self, Write};
 
 const STDIN: usize = 0;

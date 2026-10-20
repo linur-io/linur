@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use crate::sbi::console_putchar;
 use core::fmt::{self, Write};
 

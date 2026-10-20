@@ -4,28 +4,25 @@
 !.devcontainer/devcontainer.json
 
 .idea
-**/Cargo.lock
 **/target/
 
 os/src/link_app.S
 os/src/linker.ld
 os/last-*
-os/Cargo.lock
 os/.gdb_history
 user/build
 user/target/*
 user/.idea/*
-user/Cargo.lock
-easy-fs/Cargo.lock
 easy-fs/target/*
-easy-fs-fuse/Cargo.lock
 easy-fs-fuse/target/*
 tools/
 pushall.sh
 .vscode/*.log
 
+# Local scratch space for throwaway experiments; never tracked.
+/ig_/
+
 # Local coding-agent docs and config
-/AGENTS.md
 /CLAUDE.md
 /GEMINI.md
 /.aider*
@@ -40,3 +37,6 @@ pushall.sh
 # Private spec docs (D10): requirements and lineage stay untracked
 docs/spec/00-requirements*.md
 docs/spec/99-lineage*.md
+
+# Blog posts and their images live in the author's separate blog repository (D10)
+docs/rCore-chap*

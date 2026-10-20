@@ -1,0 +1,15 @@
+linur — NOTICE
+
+linur is derived from the rCore tutorial operating system:
+
+  * rCore: https://github.com/rcore-os/rCore
+  * rCore-Tutorial-v3 lineage, via the Fux-i/rCore fork:
+    https://github.com/Fux-i/rCore
+
+Copyright (c) the rCore authors and contributors. The rCore tutorial code is
+licensed under the GNU General Public License, version 3.
+
+linur is a derivative work of that code and remains under the GNU General
+Public License, version 3 only (GPL-3.0-only). Source files carry SPDX
+identifiers, and the full license text is in the LICENSE file at the root of
+this repository.

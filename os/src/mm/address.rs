@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use super::PageTableEntry;
 use crate::config::{PAGE_SIZE, PAGE_SIZE_BITS};
 use core::fmt::{self, Debug, Formatter};

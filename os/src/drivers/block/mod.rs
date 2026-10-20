@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 mod virtio_blk;
 
 pub use virtio_blk::VirtIOBlock;

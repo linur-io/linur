@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use super::TaskControlBlock;
 use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;

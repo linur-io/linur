@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use crate::config::KERNEL_HEAP_SIZE;
 use buddy_system_allocator::LockedHeap;
 use core::ptr::addr_of_mut;

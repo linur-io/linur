@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 /// use sbi call to putchar in console (qemu uart handler)
 pub fn console_putchar(c: usize) {
     #[allow(deprecated)]

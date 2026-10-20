@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 mod condvar;
 mod mutex;
 mod semaphore;

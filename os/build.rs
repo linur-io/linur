@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 static TARGET_PATH: &str = "../user/target/riscv64gc-unknown-none-elf/release/";
 
 fn main() {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use crate::sbi::shutdown;
 use crate::task::current_kstack_top;
 use core::arch::asm;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use crate::fs::{OpenFlags, open_file};
 use crate::mm::{translated_ref, translated_refmut, translated_str};
 use crate::task::{

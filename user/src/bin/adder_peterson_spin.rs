@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! It only works on a single CPU!
 
 #![no_std]

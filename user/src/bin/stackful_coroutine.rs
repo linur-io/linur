@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 // we porting below codes to Rcore Tutorial v3
 // https://cfsamson.gitbook.io/green-threads-explained-in-200-lines-of-rust/
 // https://github.com/cfsamson/example-greenthreads

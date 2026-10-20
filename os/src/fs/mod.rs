@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 mod inode;
 mod pipe;
 mod stdio;

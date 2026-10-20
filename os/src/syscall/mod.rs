@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 const SYSCALL_DUP: usize = 24;
 const SYSCALL_OPEN: usize = 56;
 const SYSCALL_CLOSE: usize = 57;

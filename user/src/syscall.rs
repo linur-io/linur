@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use core::arch::asm;
 
 const SYSCALL_DUP: usize = 24;

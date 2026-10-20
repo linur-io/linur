@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use super::TaskContext;
 use core::arch::global_asm;
 

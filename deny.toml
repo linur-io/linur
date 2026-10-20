@@ -1,0 +1,114 @@
+# Dependency policy for linur — D7 (docs/spec/00-requirements.md §3).
+#
+# Three tiers are encoded here so that they stop being prose:
+#   Tier 0 — never third-party: physical and virtual memory, page tables, trap and
+#            context switch, scheduler, VFS, on-disk FS and buffer cache, device
+#            drivers, ELF loader, libc, shell/coreutils and the boot path are ours.
+#            Tier 0 has no third-party row in this file: it is the absence of an
+#            entry that states the claim. Our own crates (os, user_lib, easy-fs) do
+#            appear in the allow list below, because cargo-deny requires every crate
+#            in the graph to be listed.
+#   Tier 1 — permanently allowed: the riscv / x86_64 architecture wrappers, bitflags,
+#            cfg-if.
+#   Tier 2 — temporary, each with a removal step in DEPENDENCIES.md: log (M1.2),
+#            spin (M2.4), virtio-drivers (M2.4), xmas-elf (M2.5),
+#            buddy_system_allocator (M2.6), sbi-rt (M5.5), the vendored
+#            bootloader/rustsbi-qemu.bin (M5.5), and lazy_static, whose removal step
+#            is an open D7 gap awaiting an owner decision.
+#
+# Enforcement lands in M1.4, where `just verify` runs `cargo deny check`. There is no
+# Cargo workspace yet (the split is M5.2), so the check runs once per manifest: os,
+# user, easy-fs. easy-fs-fuse is host-only tooling outside the D7 claim and is
+# deliberately not a target — its clap/rand closure is not ledgered here.
+#
+# Checked with cargo-deny 0.20.2 on the three manifests: licenses, bans, sources and
+# advisories all pass. The advisory database was cloned into a writable CARGO_HOME
+# because this host's ~/.cargo is read-only; CI (M1.4) owns the permanent run.
+
+[licenses]
+# GPL-3.0-only is linur itself: the derived work stays GPLv3 (spec/00 §5). An
+# unlicensed crate is reported, which is what makes the `license` field in all four
+# manifests mandatory instead of a convention. virtio-drivers still declares no
+# license of its own (it ships a LICENSE file) and is retired at M2.4; it reports as a
+# warning until then.
+# Every string below is used by at least one crate in the kernel-image graph; none is
+# guessed.
+allow = [
+    "GPL-3.0-only",  # our own crates, and the derived work as a whole
+    "Apache-2.0",    # riscv, riscv-*, log, spin, syn, proc-macro2, quote, ...
+    "MIT",           # buddy_system_allocator, spin, and the dual-licensed set above
+    "MulanPSL-2.0",  # sbi-rt and sbi-spec: "MulanPSL-2.0 OR MIT"
+    "Unicode-3.0",   # unicode-ident: "(MIT OR Apache-2.0) AND Unicode-3.0"
+]
+confidence-threshold = 0.8
+# The same file is applied to three separate graphs, so an allowance unused in one
+# manifest is expected; the union across them is what matters.
+unused-allowed-license = "allow"
+
+[bans]
+# The allow list is every crate name in the kernel-image graph: our own Tier-0 crates
+# plus the DEPENDENCIES.md ledger (Tier 1 and 2). A crate cannot enter the build
+# without a row there. Versions are not pinned here — they are pinned in the tracked
+# Cargo.lock files and recorded in DEPENDENCIES.md, so a routine bump does not have to
+# be duplicated into this file. `spin` appears once even though the graph carries two
+# versions.
+multiple-versions = "warn"
+wildcards = "deny"
+# Every dependency here is a path or git dependency of a private crate; versions come
+# from the lock files, not from semver ranges.
+allow-wildcard-paths = true
+allow = [
+    # Tier 0 — ours, by definition.
+    "os",
+    "user_lib",
+    "easy-fs",
+    # Tier 1 — permanently allowed.
+    "bitflags",
+    "critical-section",
+    "embedded-hal",
+    "pastey",
+    "proc-macro2",
+    "quote",
+    "riscv",
+    "riscv-macros",
+    "riscv-types",
+    "static_assertions",
+    "syn",
+    "unicode-ident",
+    # Tier 2 — temporary, each with a removal step in DEPENDENCIES.md.
+    "buddy_system_allocator",
+    "lazy_static",
+    "log",
+    "sbi-rt",
+    "sbi-spec",
+    "spin",
+    "virtio-drivers",
+    "volatile",
+    "xmas-elf",
+    "zero",
+]
+# Empty today. Add a crate here the moment its Tier-2 removal lands — log after M1.2,
+# spin after M2.4, and so on down the ledger — so that it cannot silently return.
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The only git dependency in the tree is virtio-drivers, which must be pinned to a
+# revision: the pin lives in os/Cargo.toml (`rev = "4ee80e5"`) and in the tracked
+# os/Cargo.lock, and `rev` is the only accepted specifier.
+required-git-spec = "rev"
+allow-git = ["https://github.com/rcore-os/virtio-drivers"]
+unused-allowed-source = "allow"
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Tier-2 crates are retired by the ledger, not by advisory status, so unmaintained
+# advisories only fail the check for crates we publish ourselves.
+unmaintained = "workspace"
+# RUSTSEC-2025-0018: xmas-elf 0.7.0 reads out of bounds on a malformed ELF. The only
+# images the kernel parses are the ones our own toolchain built and our own packer
+# wrote into fs.img, so there is no untrusted input path before M2.5 replaces xmas-elf
+# with our own loader. M2.5 must delete this ignore; it then reports as unused.
+ignore = ["RUSTSEC-2025-0018"]

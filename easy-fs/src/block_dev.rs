@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use core::any::Any;
 /// Trait for block devices
 /// which reads and writes data in the unit of blocks

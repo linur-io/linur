@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #[allow(unused)]
 
 pub const USER_STACK_SIZE: usize = 4096 * 2;

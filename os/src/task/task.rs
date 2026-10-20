@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use super::id::TaskUserRes;
 use super::{KernelStack, ProcessControlBlock, TaskContext, kstack_alloc};
 use crate::trap::TrapContext;

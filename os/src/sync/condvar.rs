@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use crate::sync::{Mutex, UPSafeCell};
 use crate::task::{TaskControlBlock, block_current_and_run_next, current_task, wakeup_task};
 use alloc::{collections::VecDeque, sync::Arc};

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 .altmacro
 .macro SAVE_SN n
     sd s\n, (\n+2)*8(a0)

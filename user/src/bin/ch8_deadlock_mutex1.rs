@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #![no_std]
 #![no_main]
 #![allow(clippy::println_empty_string)]

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use super::File;
 use crate::mm::UserBuffer;
 use crate::sbi::console_getchar;

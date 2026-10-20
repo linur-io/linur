@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use super::UPSafeCell;
 use crate::task::TaskControlBlock;
 use crate::task::{block_current_and_run_next, suspend_current_and_run_next};
