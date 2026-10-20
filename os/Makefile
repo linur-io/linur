@@ -33,6 +33,11 @@ DISASM ?= -x
 # Run usertests or usershell
 TEST ?=
 
+# Harness run: serial console teed to $(SERIAL_LOG), which .gitignore keeps out.
+SERIAL_LOG ?= last-serial.log
+# Hard cap for `make test`, in seconds: a hung suite must fail, not hang CI.
+TEST_TIMEOUT ?= 300
+
 build: preflight $(KERNEL_BIN) fs-img
 
 # Check-only preflight: never downloads or mutates the toolchain.
@@ -77,6 +82,10 @@ disasm-vim: kernel
 	@vim $(DISASM_TMP)
 	@rm $(DISASM_TMP)
 
+# Resolve the ra=0x... frames of the last panic backtrace.
+symbolize:
+	@sh scripts/symbolize.sh $(SERIAL_LOG) $(KERNEL_ELF)
+
 run: run-inner
 
 QEMU_ARGS := -machine virt \
@@ -93,6 +102,19 @@ qemu-version-check:
 run-inner: qemu-version-check build
 	@qemu-system-riscv64 $(QEMU_ARGS)
 
+# Harness run: same build as `run`, but stdin is /dev/null, TEST defaults to
+# the usertests suite, and the serial console is teed to $(SERIAL_LOG) as it
+# runs, so a crash or a timeout still leaves the whole log. Exits 0 iff QEMU
+# exits 0; make itself reports a failed recipe as status 2.
+test: TEST = 1
+test: qemu-version-check build
+	@echo "serial log: $(SERIAL_LOG)"
+	@bash -o pipefail -c 'timeout $(TEST_TIMEOUT) qemu-system-riscv64 $(QEMU_ARGS) </dev/null 2>&1 | tee $(SERIAL_LOG); \
+		status=$$?; \
+		if [ $$status -eq 124 ]; then echo "[test] TIMEOUT after $(TEST_TIMEOUT)s"; \
+		else echo "[test] qemu exit code: $$status"; fi; \
+		exit $$status'
+
 debug: qemu-version-check build
 	@tmux new-session -d \
 		"qemu-system-riscv64 $(QEMU_ARGS) -s -S" && \
@@ -105,4 +127,4 @@ gdbserver: qemu-version-check build
 gdbclient:
 	@riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
 
-.PHONY: build preflight kernel clean disasm disasm-vim run-inner fs-img gdbserver gdbclient qemu-version-check
+.PHONY: build preflight kernel clean disasm disasm-vim symbolize run test run-inner fs-img gdbserver gdbclient qemu-version-check

@@ -38,11 +38,21 @@ preflight:
 elf: preflight $(APPS)
 	@cargo build --release
 
+# TEST=1 boots the whole usertests suite as init; any other TEST names one app
+# and boots exactly that app as init, so a single failing test is reproducible.
 stage: elf
 	@rm -rf $(STAGE_DIR)
 	@mkdir -p $(STAGE_DIR)
 	@set -e; for elf in $(ELFS); do $(CP) $$elf $(STAGE_DIR)/; done
-	@if [ "$(TEST)" = "1" ]; then $(CP) $(STAGE_DIR)/usertests $(STAGE_DIR)/initproc; fi
+	@if [ "$(TEST)" = "1" ]; then \
+		$(CP) $(STAGE_DIR)/usertests $(STAGE_DIR)/initproc; \
+	elif [ -n "$(TEST)" ]; then \
+		if [ ! -f "$(STAGE_DIR)/$(TEST)" ]; then \
+			echo "error: TEST=$(TEST) is not a program in $(APP_DIR)" >&2; \
+			exit 1; \
+		fi; \
+		$(CP) $(STAGE_DIR)/$(TEST) $(STAGE_DIR)/initproc; \
+	fi
 
 binary: elf
 	@$(foreach elf, $(ELFS), $(OBJCOPY) $(elf) --strip-all -O binary $(patsubst $(TARGET_DIR)/%, $(TARGET_DIR)/%.bin, $(elf));)
