@@ -100,16 +100,19 @@ qemu-version-check:
 	@sh scripts/qemu-ver-check.sh $(QEMU_NAME)
 
 run-inner: qemu-version-check build
+	@echo "interactive QEMU: Ctrl-A x quits, Ctrl-C/Ctrl-D go to the guest"
 	@qemu-system-riscv64 $(QEMU_ARGS)
 
 # Harness run: same build as `run`, but stdin is /dev/null, TEST defaults to
 # the usertests suite, and the serial console is teed to $(SERIAL_LOG) as it
 # runs, so a crash or a timeout still leaves the whole log. Exits 0 iff QEMU
 # exits 0; make itself reports a failed recipe as status 2.
+# --foreground keeps QEMU in the terminal's process group, so Ctrl-C reaches it
+# instead of only killing the pipeline around it.
 test: TEST = 1
 test: qemu-version-check build
 	@echo "serial log: $(SERIAL_LOG)"
-	@bash -o pipefail -c 'timeout $(TEST_TIMEOUT) qemu-system-riscv64 $(QEMU_ARGS) </dev/null 2>&1 | tee $(SERIAL_LOG); \
+	@bash -o pipefail -c 'timeout --foreground $(TEST_TIMEOUT) qemu-system-riscv64 $(QEMU_ARGS) </dev/null 2>&1 | tee $(SERIAL_LOG); \
 		status=$$?; \
 		if [ $$status -eq 124 ]; then echo "[test] TIMEOUT after $(TEST_TIMEOUT)s"; \
 		else echo "[test] qemu exit code: $$status"; fi; \

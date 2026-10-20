@@ -15,8 +15,9 @@ make test                     # boots the suite (TEST defaults to 1), then exits
 make test TEST=<app>          # boots one app as init (e.g. TEST=hello_world)
 ```
 
-`make test` runs `timeout $(TEST_TIMEOUT) qemu-system-riscv64 $(QEMU_ARGS)
-</dev/null 2>&1 | tee last-serial.log` under `bash -o pipefail`, so:
+`make test` runs `timeout --foreground $(TEST_TIMEOUT) qemu-system-riscv64
+$(QEMU_ARGS) </dev/null 2>&1 | tee last-serial.log` under `bash -o pipefail`,
+so:
 
 * the log is `os/last-serial.log`, covered by `os/last-*` in `.gitignore`
   (verified with `git check-ignore`); `SERIAL_LOG=<path>` overrides it;
@@ -43,6 +44,30 @@ Add `bash -o pipefail -c` if you also want QEMU's exit status: without it the
 pipeline reports `tee`'s.
 
 `-nographic` puts the serial console on stdio; the monitor shares it (§3).
+
+### Stopping a run
+
+The two run modes need different keys, and neither Ctrl-C nor Ctrl-D works in
+both:
+
+* `make test` — Ctrl-C stops it. QEMU runs under `timeout --foreground`, so it
+  stays in the terminal's process group and the signal reaches it (verified: the
+  run dies, make exits with SIGINT, no QEMU process is left). `TEST_TIMEOUT`
+  caps a run that hangs even without a key. From another terminal,
+  `pkill -f qemu-system-riscv64` always works.
+* `make run [TEST=...]` — QEMU switches the terminal to raw mode (verified:
+  `ICANON`, `ISIG` and `ECHO` are cleared while it runs), so **Ctrl-C and
+  Ctrl-D are forwarded to the guest console, not to the host**: they do not stop
+  the run, and a program that does not read the console (the whole suite) just
+  ignores them. Quit with **Ctrl-A then lowercase `x`**; a bare `x` and
+  uppercase `X` are not the escape (verified: only `x` exits). `Ctrl-A c`
+  switches to the monitor, where `quit` exits too. If QEMU is killed hard
+  (`SIGKILL`), the terminal stays raw — `stty sane` restores it. A terminal
+  multiplexer that uses Ctrl-A as its prefix swallows the escape: send the
+  prefix twice.
+* Keys never help when stdin is not QEMU's stdin: `make test` hands QEMU
+  `/dev/null`, so `Ctrl-A` sequences cannot arrive. That is why the harness
+  needs a signal (`Ctrl-C`) rather than a guest keystroke.
 
 ## 2. Panic and stack trace
 
