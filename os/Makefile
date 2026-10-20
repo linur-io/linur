@@ -4,7 +4,7 @@ MODE := release
 KERNEL_ELF := target/$(TARGET)/$(MODE)/os
 KERNEL_BIN := $(KERNEL_ELF).bin
 DISASM_TMP := target/$(TARGET)/$(MODE)/asm
-FS_IMG := ../user/target/$(TARGET)/$(MODE)/fs.img
+FS_IMG := ../user/build/fs.img
 APPS := ../user/src/bin/*
 
 # BOARD
@@ -20,9 +20,12 @@ endif
 # KERNEL ENTRY
 KERNEL_ENTRY_PA := 0x80200000
 
-# Binutils
-OBJDUMP := rust-objdump --arch-name=riscv64
-OBJCOPY := rust-objcopy --binary-architecture=riscv64
+# Binutils straight from rustup's llvm-tools component; cargo-binutils is not needed.
+SYSROOT := $(shell rustc --print sysroot)
+HOST := $(shell rustc -vV | sed -n 's/^host: //p')
+LLVM_BIN := $(SYSROOT)/lib/rustlib/$(HOST)/bin
+OBJDUMP := $(LLVM_BIN)/llvm-objdump --arch-name=riscv64
+OBJCOPY := $(LLVM_BIN)/llvm-objcopy --binary-architecture=riscv64
 
 # Disassembly
 DISASM ?= -x
@@ -30,21 +33,30 @@ DISASM ?= -x
 # Run usertests or usershell
 TEST ?=
 
-build: env $(KERNEL_BIN) fs-img 
+build: preflight $(KERNEL_BIN) fs-img
 
-env:
-	(rustup target list | grep "riscv64gc-unknown-none-elf (installed)") || rustup target add $(TARGET)
-	cargo install cargo-binutils
-	rustup component add rust-src
-	rustup component add llvm-tools-preview
+# Check-only preflight: never downloads or mutates the toolchain.
+preflight:
+	@missing=""; \
+	if [ ! -d "$(SYSROOT)/lib/rustlib/$(TARGET)/lib" ]; then missing="$$missing\n  rustup target add $(TARGET)"; fi; \
+	if [ ! -d "$(SYSROOT)/lib/rustlib/src/rust/library" ]; then missing="$$missing\n  rustup component add rust-src"; fi; \
+	if [ ! -x "$(LLVM_BIN)/llvm-objcopy" ] || [ ! -x "$(LLVM_BIN)/llvm-objdump" ]; then missing="$$missing\n  rustup component add llvm-tools-preview"; fi; \
+	if [ -n "$$missing" ]; then \
+		printf 'error: Rust toolchain is missing pieces (make never downloads anything):%b\n' "$$missing" >&2; \
+		echo "run the commands above once, then re-run make." >&2; \
+		exit 1; \
+	fi
 
 $(KERNEL_BIN): kernel
 	@$(OBJCOPY) $(KERNEL_ELF) --strip-all -O binary $@
 
+# Pack fs.img from user/build/stage, never from user/target: cargo hardlinks
+# target/<triple>/release/<bin> into its deps cache, so writing an app there
+# corrupts the cache for every later build.
 fs-img: $(APPS)
 	@cd ../user && make build TEST=$(TEST)
 	@rm -f $(FS_IMG)
-	@cd ../easy-fs-fuse && cargo run --release -- -s ../user/src/bin/ -t ../user/target/riscv64gc-unknown-none-elf/release/
+	@cd ../easy-fs-fuse && cargo run --release -- -s ../user/build/stage -t ../user/build/
 
 $(APPS):
 
@@ -93,4 +105,4 @@ gdbserver: qemu-version-check build
 gdbclient:
 	@riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
 
-.PHONY: build env kernel clean disasm disasm-vim run-inner fs-img gdbserver gdbclient qemu-version-check
+.PHONY: build preflight kernel clean disasm disasm-vim run-inner fs-img gdbserver gdbclient qemu-version-check
