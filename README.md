@@ -43,6 +43,11 @@ suite in QEMU and exits 0 only if every expected success and every expected fail
 holds. Packing never writes into the cargo target directory, so a run cannot corrupt
 the cache.
 
+## Debugging
+
+Panic traces, the crash-surviving serial log, QEMU monitor and gdb recipes:
+[docs/debugging.md](docs/debugging.md).
+
 ## License
 
 GPL-3.0-only. The full text is [LICENSE](LICENSE); attribution is [NOTICE](NOTICE).
