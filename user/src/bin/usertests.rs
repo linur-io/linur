@@ -60,6 +60,8 @@ static SUCC_TESTS: &[(&str, &str, &str, &str, i32)] = &[
     ("stackful_coroutine\0", "\0", "\0", "\0", 0),
     ("stackless_coroutine\0", "\0", "\0", "\0", 0),
     ("usertests_simple\0", "\0", "\0", "\0", 0),
+    // M1.3a: EFAULT/EINVAL/ENOSYS negative cases
+    ("syscall_errors\0", "\0", "\0", "\0", 0),
 ];
 
 static FAIL_TESTS: &[(&str, &str, &str, &str, i32)] = &[

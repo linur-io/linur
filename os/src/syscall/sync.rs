@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::errno::EINVAL;
 use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore};
 use crate::task::{block_current_and_run_next, current_process, current_task};
 use crate::timer::{add_timer, get_time_ms};
@@ -14,6 +15,14 @@ fn current_tid() -> usize {
         .as_ref()
         .unwrap()
         .tid
+}
+
+/// Clone object `id`, or `EINVAL` when it was never created.
+fn get<T: Clone>(list: &[Option<T>], id: usize) -> Result<T, isize> {
+    list.get(id)
+        .and_then(|item| item.as_ref())
+        .cloned()
+        .ok_or(EINVAL)
 }
 
 pub fn sys_enable_deadlock_detect(is_enable: usize) -> isize {
@@ -73,7 +82,10 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     let tid = current_tid();
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
-    let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
+    let mutex = match get(&process_inner.mutex_list, mutex_id) {
+        Ok(mutex) => mutex,
+        Err(e) => return e,
+    };
     let thread_count = process_inner.tasks.len();
     let detect = process_inner.deadlock_detect_enabled;
     if !process_inner
@@ -95,7 +107,10 @@ pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
     let tid = current_tid();
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
-    let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
+    let mutex = match get(&process_inner.mutex_list, mutex_id) {
+        Ok(mutex) => mutex,
+        Err(e) => return e,
+    };
     process_inner.mutex_detector.release(tid, mutex_id);
     drop(process_inner);
     mutex.unlock();
@@ -128,7 +143,10 @@ pub fn sys_semaphore_up(sem_id: usize) -> isize {
     let tid = current_tid();
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
-    let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
+    let sem = match get(&process_inner.semaphore_list, sem_id) {
+        Ok(sem) => sem,
+        Err(e) => return e,
+    };
     process_inner.semaphore_detector.release(tid, sem_id);
     drop(process_inner);
     sem.up();
@@ -139,7 +157,10 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     let tid = current_tid();
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
-    let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
+    let sem = match get(&process_inner.semaphore_list, sem_id) {
+        Ok(sem) => sem,
+        Err(e) => return e,
+    };
     let thread_count = process_inner.tasks.len();
     let detect = process_inner.deadlock_detect_enabled;
     if !process_inner
@@ -181,7 +202,10 @@ pub fn sys_condvar_create() -> isize {
 pub fn sys_condvar_signal(condvar_id: usize) -> isize {
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
-    let condvar = Arc::clone(process_inner.condvar_list[condvar_id].as_ref().unwrap());
+    let condvar = match get(&process_inner.condvar_list, condvar_id) {
+        Ok(condvar) => condvar,
+        Err(e) => return e,
+    };
     drop(process_inner);
     condvar.signal();
     0
@@ -191,8 +215,14 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
     let tid = current_tid();
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
-    let condvar = Arc::clone(process_inner.condvar_list[condvar_id].as_ref().unwrap());
-    let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
+    let condvar = match get(&process_inner.condvar_list, condvar_id) {
+        Ok(condvar) => condvar,
+        Err(e) => return e,
+    };
+    let mutex = match get(&process_inner.mutex_list, mutex_id) {
+        Ok(mutex) => mutex,
+        Err(e) => return e,
+    };
     process_inner.mutex_detector.release(tid, mutex_id);
     drop(process_inner);
     condvar.wait(mutex);

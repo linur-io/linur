@@ -22,6 +22,7 @@ mod console;
 mod logging;
 mod config;
 mod drivers;
+mod errno;
 mod fs;
 mod lang_items;
 mod mm;

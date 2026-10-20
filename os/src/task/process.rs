@@ -4,8 +4,9 @@ use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;
 use super::{PidHandle, pid_alloc};
 use super::{SignalFlags, add_task};
+use crate::config::USER_STACK_SIZE;
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{KERNEL_SPACE, MemorySet, translated_refmut};
+use crate::mm::{KERNEL_SPACE, MemorySet, copy_to_user};
 use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{TrapContext, trap_handler};
 use alloc::string::String;
@@ -93,16 +94,20 @@ impl DeadlockDetector {
 
     /// Records an acquisition which did not pass through a sync syscall.
     pub fn allocate(&mut self, tid: usize, resource_id: usize) {
-        self.available[resource_id] -= 1;
+        self.ensure_threads(tid + 1);
+        self.available[resource_id] = self.available[resource_id].saturating_sub(1);
         self.allocation[tid][resource_id] += 1;
     }
 
-    /// Records one released resource.
+    /// Records one released resource. A release without a matching acquisition
+    /// is a user error, and changes nothing.
     pub fn release(&mut self, tid: usize, resource_id: usize) {
-        if self.allocation[tid][resource_id] > 0 {
-            self.allocation[tid][resource_id] -= 1;
+        if let Some(row) = self.allocation.get_mut(tid) {
+            if row[resource_id] > 0 {
+                row[resource_id] -= 1;
+                self.available[resource_id] += 1;
+            }
         }
-        self.available[resource_id] += 1;
     }
 
     /// Returns whether every tracked thread can finish in some order.
@@ -174,6 +179,11 @@ impl ProcessControlBlockInner {
     }
 }
 
+/// Write into the fresh user stack; the size check in `exec` guarantees it fits.
+fn write_user(token: usize, va: usize, bytes: &[u8]) {
+    copy_to_user(token, va as *mut u8, bytes).expect("argv fits in the user stack");
+}
+
 impl ProcessControlBlock {
     pub fn inner_exclusive_access(&self) -> RefMut<'_, ProcessControlBlockInner> {
         self.inner.exclusive_access()
@@ -181,7 +191,9 @@ impl ProcessControlBlock {
 
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let Some((memory_set, ustack_base, entry_point)) = MemorySet::from_elf(elf_data) else {
+            panic!("init process image is not a valid ELF");
+        };
         // allocate a pid
         let pid_handle = pid_alloc();
         let process = Arc::new(Self {
@@ -242,11 +254,18 @@ impl ProcessControlBlock {
         process
     }
 
-    /// Only support processes with a single thread.
-    pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
-        assert_eq!(self.inner_exclusive_access().thread_count(), 1);
-        // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+    /// Only support processes with a single thread (checked by `sys_exec`).
+    /// Returns false when the image cannot be loaded or `argv` does not fit.
+    pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) -> bool {
+        let Some((memory_set, ustack_base, entry_point)) = MemorySet::from_elf(elf_data) else {
+            return false;
+        };
+        let slot_size = core::mem::size_of::<usize>();
+        let argv_slots = (args.len() + 1) * slot_size;
+        let argv_bytes: usize = args.iter().map(|arg| arg.len() + 1).sum();
+        if argv_slots + argv_bytes + slot_size > USER_STACK_SIZE {
+            return false;
+        }
         let new_token = memory_set.token();
         // substitute memory_set
         self.inner_exclusive_access().memory_set = memory_set;
@@ -257,31 +276,22 @@ impl ProcessControlBlock {
         task_inner.res.as_mut().unwrap().ustack_base = ustack_base;
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
-        // push arguments on user stack
-        let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
-        user_sp -= (args.len() + 1) * core::mem::size_of::<usize>();
+        // push arguments on user stack: the argv array first, then its strings
+        let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top() - argv_slots;
         let argv_base = user_sp;
-        let mut argv: Vec<_> = (0..=args.len())
-            .map(|arg| {
-                translated_refmut(
-                    new_token,
-                    (argv_base + arg * core::mem::size_of::<usize>()) as *mut usize,
-                )
-            })
-            .collect();
-        *argv[args.len()] = 0;
-        for i in 0..args.len() {
-            user_sp -= args[i].len() + 1;
-            *argv[i] = user_sp;
-            let mut p = user_sp;
-            for c in args[i].as_bytes() {
-                *translated_refmut(new_token, p as *mut u8) = *c;
-                p += 1;
-            }
-            *translated_refmut(new_token, p as *mut u8) = 0;
+        for (i, arg) in args.iter().enumerate() {
+            user_sp -= arg.len() + 1;
+            write_user(new_token, argv_base + i * slot_size, &user_sp.to_ne_bytes());
+            write_user(new_token, user_sp, arg.as_bytes());
+            write_user(new_token, user_sp + arg.len(), &[0]);
         }
+        write_user(
+            new_token,
+            argv_base + args.len() * slot_size,
+            &0usize.to_ne_bytes(),
+        );
         // make the user_sp aligned to 8B for k210 platform
-        user_sp -= user_sp % core::mem::size_of::<usize>();
+        user_sp -= user_sp % slot_size;
         // initialize trap_cx
         let mut trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -293,6 +303,7 @@ impl ProcessControlBlock {
         trap_cx.x[10] = args.len();
         trap_cx.x[11] = argv_base;
         *task_inner.get_trap_cx() = trap_cx;
+        true
     }
 
     /// Only support processes with a single thread.

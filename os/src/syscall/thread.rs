@@ -65,22 +65,15 @@ pub fn sys_waittid(tid: usize) -> i32 {
     if task_inner.res.as_ref().unwrap().tid == tid {
         return -1;
     }
-    let mut exit_code: Option<i32> = None;
-    let waited_task = process_inner.tasks[tid].as_ref();
-    if let Some(waited_task) = waited_task {
-        if let Some(waited_exit_code) = waited_task.inner_exclusive_access().exit_code {
-            exit_code = Some(waited_exit_code);
-        }
-    } else {
+    let Some(waited_task) = process_inner.tasks.get(tid).and_then(|task| task.as_ref()) else {
         // waited thread does not exist
         return -1;
-    }
-    if let Some(exit_code) = exit_code {
-        // dealloc the exited thread
-        process_inner.tasks[tid] = None;
-        exit_code
-    } else {
+    };
+    let Some(exit_code) = waited_task.inner_exclusive_access().exit_code else {
         // waited thread has not exited
-        -2
-    }
+        return -2;
+    };
+    // dealloc the exited thread
+    process_inner.tasks[tid] = None;
+    exit_code
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{
     block_cache_sync_all, get_block_cache, BlockDevice, DirEntry, DiskInode, DiskInodeType,
-    EasyFileSystem, DIRENT_SZ,
+    EasyFileSystem, DIRENT_SZ, NAME_LENGTH_LIMIT,
 };
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -93,6 +93,11 @@ impl Inode {
     }
     /// Create inode under current inode by name
     pub fn create(&self, name: &str) -> Option<Arc<Inode>> {
+        // A name must fit one directory entry, or be rejected here: a longer
+        // one used to overflow the entry and panic the kernel.
+        if name.is_empty() || name.len() > NAME_LENGTH_LIMIT {
+            return None;
+        }
         let mut fs = self.fs.lock();
         let op = |root_inode: &DiskInode| {
             // assert it is a directory
@@ -235,7 +240,7 @@ impl Inode {
     ///
     /// Only valid when called on a directory inode (the root in this teaching FS).
     pub fn link(&self, old_name: &str, new_name: &str) -> isize {
-        if old_name == new_name {
+        if old_name == new_name || new_name.is_empty() || new_name.len() > NAME_LENGTH_LIMIT {
             return -1;
         }
         let mut fs = self.fs.lock();

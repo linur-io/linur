@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::errno::EINVAL;
 use crate::fs::{OpenFlags, make_pipe, open_file};
-use crate::mm::{UserBuffer, translated_byte_buffer, translated_refmut, translated_str};
+use crate::mm::{copy_to_user, translated_byte_buffer, translated_byte_buffer_mut, translated_str};
 use crate::task::{current_process, current_user_token};
 use alloc::sync::Arc;
 
@@ -18,13 +19,17 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
         let file = file.clone();
         // release current task TCB manually to avoid multi-borrow
         drop(inner);
-        file.write(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
+        let buffer = match translated_byte_buffer(token, buf, len) {
+            Ok(buffer) => buffer,
+            Err(e) => return e,
+        };
+        file.write(buffer) as isize
     } else {
         -1
     }
 }
 
-pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
+pub fn sys_read(fd: usize, buf: *mut u8, len: usize) -> isize {
     let token = current_user_token();
     let process = current_process();
     let inner = process.inner_exclusive_access();
@@ -38,7 +43,11 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
         }
         // release current task TCB manually to avoid multi-borrow
         drop(inner);
-        file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
+        let buffer = match translated_byte_buffer_mut(token, buf, len) {
+            Ok(buffer) => buffer,
+            Err(e) => return e,
+        };
+        file.read(buffer) as isize
     } else {
         -1
     }
@@ -47,8 +56,14 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
 pub fn sys_open(path: *const u8, flags: u32) -> isize {
     let process = current_process();
     let token = current_user_token();
-    let path = translated_str(token, path);
-    if let Some(inode) = open_file(path.as_str(), OpenFlags::from_bits(flags).unwrap()) {
+    let path = match translated_str(token, path) {
+        Ok(path) => path,
+        Err(e) => return e,
+    };
+    let Some(flags) = OpenFlags::from_bits(flags) else {
+        return EINVAL;
+    };
+    if let Some(inode) = open_file(path.as_str(), flags) {
         let mut inner = process.inner_exclusive_access();
         let fd = inner.alloc_fd();
         inner.fd_table[fd] = Some(inode);
@@ -80,8 +95,19 @@ pub fn sys_pipe(pipe: *mut usize) -> isize {
     inner.fd_table[read_fd] = Some(pipe_read);
     let write_fd = inner.alloc_fd();
     inner.fd_table[write_fd] = Some(pipe_write);
-    *translated_refmut(token, pipe) = read_fd;
-    *translated_refmut(token, unsafe { pipe.add(1) }) = write_fd;
+    let result = copy_to_user(token, pipe as *mut u8, &read_fd.to_ne_bytes()).and_then(|()| {
+        copy_to_user(
+            token,
+            pipe.wrapping_add(1) as *mut u8,
+            &write_fd.to_ne_bytes(),
+        )
+    });
+    if let Err(e) = result {
+        // a failed pipe must not leave the two descriptors allocated
+        inner.fd_table[read_fd] = None;
+        inner.fd_table[write_fd] = None;
+        return e;
+    }
     0
 }
 

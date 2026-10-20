@@ -3,7 +3,7 @@ use super::{FrameTracker, frame_alloc};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use super::{StepByOne, VPNRange};
-use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE};
+use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
 use crate::sync::UPSafeCell;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -177,51 +177,67 @@ impl MemorySet {
         }
         memory_set
     }
-    /// Include sections in elf and trampoline,
-    /// also returns user_sp_base and entry point.
-    pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize) {
+    /// Include sections in elf and trampoline, also returns user_sp_base and
+    /// entry point. `None` when `elf_data` is not a loadable image: a bad image
+    /// is an error return, never a panic.
+    pub fn from_elf(elf_data: &[u8]) -> Option<(Self, usize, usize)> {
         let mut memory_set = Self::new_bare();
         // map trampoline
         memory_set.map_trampoline();
         // map program headers of elf, with U flag
-        let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
+        let elf = xmas_elf::ElfFile::new(elf_data).ok()?;
         let elf_header = elf.header;
-        let magic = elf_header.pt1.magic;
-        assert_eq!(magic, [0x7f, 0x45, 0x4c, 0x46], "invalid elf!");
+        if elf_header.pt1.magic != [0x7f, 0x45, 0x4c, 0x46] {
+            return None;
+        }
         let ph_count = elf_header.pt2.ph_count();
         let mut max_end_vpn = VirtPageNum(0);
         for i in 0..ph_count {
-            let ph = elf.program_header(i).unwrap();
-            if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
-                let start_va: VirtAddr = (ph.virtual_addr() as usize).into();
-                let end_va: VirtAddr = ((ph.virtual_addr() + ph.mem_size()) as usize).into();
-                let mut map_perm = MapPermission::U;
-                let ph_flags = ph.flags();
-                if ph_flags.is_read() {
-                    map_perm |= MapPermission::R;
-                }
-                if ph_flags.is_write() {
-                    map_perm |= MapPermission::W;
-                }
-                if ph_flags.is_execute() {
-                    map_perm |= MapPermission::X;
-                }
-                let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
-                max_end_vpn = map_area.vpn_range.get_end();
-                memory_set.push(
-                    map_area,
-                    Some(&elf.input[ph.offset() as usize..(ph.offset() + ph.file_size()) as usize]),
-                );
+            let ph = elf.program_header(i).ok()?;
+            if ph.get_type().ok()? != xmas_elf::program::Type::Load {
+                continue;
             }
+            let start: usize = ph.virtual_addr() as usize;
+            let end = start.checked_add(ph.mem_size() as usize)?;
+            // A loadable image must end below the trap context page, which sits
+            // above the user stack, and must not be empty.
+            if end <= start || end > TRAP_CONTEXT_BASE - PAGE_SIZE - USER_STACK_SIZE {
+                return None;
+            }
+            if ph.file_size() > ph.mem_size() {
+                return None;
+            }
+            let offset = ph.offset() as usize;
+            let data = elf
+                .input
+                .get(offset..offset.checked_add(ph.file_size() as usize)?)?;
+            let mut map_perm = MapPermission::U;
+            let ph_flags = ph.flags();
+            if ph_flags.is_read() {
+                map_perm |= MapPermission::R;
+            }
+            if ph_flags.is_write() {
+                map_perm |= MapPermission::W;
+            }
+            if ph_flags.is_execute() {
+                map_perm |= MapPermission::X;
+            }
+            let map_area = MapArea::new(start.into(), end.into(), MapType::Framed, map_perm);
+            // Segments must not overlap: mapping one page twice is a bug.
+            if map_area.vpn_range.get_start() < max_end_vpn {
+                return None;
+            }
+            max_end_vpn = map_area.vpn_range.get_end();
+            memory_set.push(map_area, Some(data));
         }
         let max_end_va: VirtAddr = max_end_vpn.into();
         let mut user_stack_base: usize = max_end_va.into();
         user_stack_base += PAGE_SIZE;
-        (
+        Some((
             memory_set,
             user_stack_base,
             elf.header.pt2.entry_point() as usize,
-        )
+        ))
     }
     pub fn from_existed_user(user_space: &MemorySet) -> MemorySet {
         let mut memory_set = Self::new_bare();

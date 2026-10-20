@@ -17,6 +17,11 @@ pub fn print(args: fmt::Arguments) {
     Stdout.write_fmt(args).unwrap();
 }
 
+/// Write one byte, without assuming UTF-8: a program may name any byte.
+pub fn put_byte(byte: u8) {
+    console_putchar(byte as usize);
+}
+
 #[macro_export]
 macro_rules! print {
     ($fmt: literal $(, $($arg: tt)+)?) => {
