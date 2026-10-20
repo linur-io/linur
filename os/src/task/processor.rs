@@ -91,10 +91,6 @@ pub fn current_trap_cx_user_va() -> usize {
         .trap_cx_user_va()
 }
 
-pub fn current_kstack_top() -> usize {
-    current_task().unwrap().kstack.get_top()
-}
-
 pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     let mut processor = PROCESSOR.exclusive_access();
     let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();

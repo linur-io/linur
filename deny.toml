@@ -10,7 +10,8 @@
 #            in the graph to be listed.
 #   Tier 1 — permanently allowed: the riscv / x86_64 architecture wrappers, bitflags,
 #            cfg-if.
-#   Tier 2 — temporary, each with a removal step in DEPENDENCIES.md: log (M1.2),
+#   Tier 2 — temporary, each with a removal step in DEPENDENCIES.md: log (M1.2 for
+#            our own code; the crate itself leaves with virtio-drivers at M2.4),
 #            spin (M2.4), virtio-drivers (M2.4), xmas-elf (M2.5),
 #            buddy_system_allocator (M2.6), sbi-rt (M5.5), the vendored
 #            bootloader/rustsbi-qemu.bin (M5.5), and lazy_static, whose removal step
@@ -78,6 +79,8 @@ allow = [
     # Tier 2 — temporary, each with a removal step in DEPENDENCIES.md.
     "buddy_system_allocator",
     "lazy_static",
+    # No longer used by our code since M1.2; `virtio-drivers` still pulls it in, so it
+    # cannot move to `deny` before M2.4.
     "log",
     "sbi-rt",
     "sbi-spec",
@@ -87,8 +90,8 @@ allow = [
     "xmas-elf",
     "zero",
 ]
-# Empty today. Add a crate here the moment its Tier-2 removal lands — log after M1.2,
-# spin after M2.4, and so on down the ledger — so that it cannot silently return.
+# Empty today. Add a crate here the moment its Tier-2 removal lands — log and spin
+# after M2.4, and so on down the ledger — so that it cannot silently return.
 deny = []
 
 [sources]

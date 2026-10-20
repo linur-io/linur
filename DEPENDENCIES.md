@@ -33,7 +33,7 @@ port starts at M1.5) and `cfg-if` (reached only from host-only tooling today).
 | critical-section | 1.2.0 | critical-section abstraction required by `riscv` | Tier 1 | Fuxi | — |
 | embedded-hal | 1.0.0 | delay and serial traits required by `riscv` | Tier 1 | Fuxi | — |
 | lazy_static | 1.5.0 | global singletons, via the `spin_no_std` feature | Tier 2 | Fuxi | open — D7 gap, owner decision (proposed: retire with `log` in M1.2) |
-| log | 0.4.33 | log macros behind `os/src/logging.rs` | Tier 2 | Fuxi | M1.2 |
+| log | 0.4.33 | `log` facade used only by `virtio-drivers`; our own `os/src/logging.rs` stopped using it at M1.2 | Tier 2 | Fuxi | M2.4 (leaves the graph with `virtio-drivers`; the direct `os/` dependency ended at M1.2) |
 | pastey | 0.2.3 | `paste!` for register definitions in `riscv` | Tier 1 | Fuxi | — |
 | proc-macro2 | 1.0.107 | proc-macro plumbing, host-side at build time | Tier 1 | Fuxi | — |
 | quote | 1.0.47 | proc-macro plumbing, host-side at build time | Tier 1 | Fuxi | — |
