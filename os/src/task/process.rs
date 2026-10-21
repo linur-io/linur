@@ -102,11 +102,11 @@ impl DeadlockDetector {
     /// Records one released resource. A release without a matching acquisition
     /// is a user error, and changes nothing.
     pub fn release(&mut self, tid: usize, resource_id: usize) {
-        if let Some(row) = self.allocation.get_mut(tid) {
-            if row[resource_id] > 0 {
-                row[resource_id] -= 1;
-                self.available[resource_id] += 1;
-            }
+        if let Some(row) = self.allocation.get_mut(tid)
+            && row[resource_id] > 0
+        {
+            row[resource_id] -= 1;
+            self.available[resource_id] += 1;
         }
     }
 
