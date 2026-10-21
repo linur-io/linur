@@ -7,7 +7,7 @@ Read with `spec/00-requirements.md` (decisions) and `spec/01-rCore-vs-linux011.m
 
 1. **Milestones carry tags and blog posts; steps do not.** A milestone is tagged and written up; the day-sized steps inside it are ordinary commits.
 2. **Day-sized steps.** Anything that cannot honestly fit in a few days is split before work starts.
-3. **No tag without a green run.** A milestone ends with `just verify` passing on a clean clone; the tag annotation records the commit and the run.
+3. **No tag without a green run.** A milestone ends with `make verify` passing on a clean clone; the tag annotation records the commit and the run.
 4. **Spec before code.** Each step's interface is written down before implementation; a module without a written contract cannot later be owned by a classmate.
 5. **The checklist is the contract.** `spec/03` exists before M1 starts and is updated by every milestone; v1.0 is reached when it has no unexplained gaps.
 6. **Dependencies move down, never up.** A step that replaces a Tier-2 crate deletes it from `Cargo.toml` and `DEPENDENCIES.md` in the same PR.
@@ -32,10 +32,10 @@ Read with `spec/00-requirements.md` (decisions) and `spec/01-rCore-vs-linux011.m
 | M1.2 Debug and observability | panic with file:line and a stack trace; boot log that survives a crash; run-one-failing-test isolation in the harness; documented gdb and QEMU-monitor recipes; retire `log` (the own logging facilities built here replace it) | S |
 | M1.3a Fault-safe copies and error returns | `copy_from_user` / `copy_to_user`; `ENOSYS` / `EINVAL` / `EFAULT`; every kernel-panic-on-user-error path eliminated; negative tests | S |
 | M1.3b Linux ABI and errno | errno conversion, six arguments, per-arch syscall tables (riscv64 first); `user_lib` and all 55 user programs migrated, with full regression | M |
-| M1.4 Minimal `just verify` gate | build + boot + exit-code assertion + per-test reporting (riscv64: SiFive test device, code shifted into the high half word-ORed with 0x3333; x86_64: `isa-debug-exit`, verified present in QEMU 8.2.2) + serial log and report artifacts; the CI workflow itself (`git submodule update --init --recursive`, caching, serial-log and report artifacts); a negative test that must fail | S |
+| M1.4 Minimal `make verify` gate | build + boot + exit-code assertion + per-test reporting (riscv64: SiFive test device, code shifted into the high half word-ORed with 0x3333; x86_64: `isa-debug-exit`, verified present in QEMU 8.2.2) + serial log and report artifacts; the CI workflow itself (`git submodule update --init --recursive`, caching, serial-log and report artifacts); a negative test that must fail | S |
 | M1.5 x86_64 smoke bring-up | own loader → long mode → serial output → clean exit in CI; deliberately **no** user mode, no devices, no real interrupt handling; a first `hal` seam with two implementations covering console and exit only; the x86_64 compile-only CI check (`cargo check --target x86_64-unknown-none`, no boot required) starts here and is kept until M5.4 lands the full port | M |
 
-**Gate.** Per-architecture capability matrix — every milestone gate states its matrix, and the matrix grows until both architectures run the full suite from M5 on. M1: riscv64 runs `just verify` green on a clean clone with the full suite; x86_64 runs the smoke path (loader → long mode → serial → clean exit) plus the compile-only check. The negative test fails as required; ABI negative tests prove `EFAULT` / `ENOSYS` behaviour; documents committed.
+**Gate.** Per-architecture capability matrix — every milestone gate states its matrix, and the matrix grows until both architectures run the full suite from M5 on. M1: riscv64 runs `make verify` green on a clean clone with the full suite; x86_64 runs the smoke path (loader → long mode → serial → clean exit) plus the compile-only check. The negative test fails as required; ABI negative tests prove `EFAULT` / `ENOSYS` behaviour; documents committed.
 **Not in M1.** Feature work. This milestone exists to make everything after it testable.
 
 ### M2 存储与自主模块 / Storage and owned modules (M) → `v0.2.0`

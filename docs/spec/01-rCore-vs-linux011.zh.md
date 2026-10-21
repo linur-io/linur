@@ -53,7 +53,7 @@
 | **块设备** | 软盘（FDC + DMA）和 ST-506/ATA（0x1f0–0x1f7，CHS，MAX_HD 2），可选的 ramdisk（默认关闭）；启动时读分区表 | 只有一个驱动：通过 `virtio-drivers` crate 访问 0x1000_1000 处的 virtio-MMIO，轮询，DMA 页帧**永久泄漏** | 自建块驱动 + 请求层 |
 | **字符设备** | `/dev/null`，真正的 `/dev/port`（在 64 KiB 上做 inb/outb），`/dev/mem`/`/dev/kmem`/`/dev/ram` 全部返回 `-EIO`；按主设备号分派的表 | 没有设备节点，没有 `/dev`，没有 `ioctl`，没有 `mknod` | `/dev` + 主/次设备号分派 |
 | **配置** | `Makefile` + `config.h`（`RAMDISK` 被注释掉；键盘布局 KBD_FINNISH 与 KBD_US/GR/FR） | `config.rs` 里硬编码的 `const`；没有 feature，没有 Kconfig，没有构建期配置 | `config/<board>.toml` → 生成的常量（D6） |
-| **测试 / CI** | 源码树里没有（实验课另外接上 `testlab2.c` 之类） | 没有 CI，没有 `test` 目标，只有一个宿主机测试（`easy-fs-fuse::efs_test`，通过）；`make run TEST=1` 是交互式的，但**确实**会返回 QEMU 退出码 0 / 255（实测）；55 个应用里有 16 个从未被跑到；`usertests` 只是碰巧通过（一个缺失的应用被算作预期失败） | `just verify` 门禁 + 真正的矩阵 |
+| **测试 / CI** | 源码树里没有（实验课另外接上 `testlab2.c` 之类） | 没有 CI，没有 `test` 目标，只有一个宿主机测试（`easy-fs-fuse::efs_test`，通过）；`make run TEST=1` 是交互式的，但**确实**会返回 QEMU 退出码 0 / 255（实测）；55 个应用里有 16 个从未被跑到；`usertests` 只是碰巧通过（一个缺失的应用被算作预期失败） | `make verify` 门禁 + 真正的矩阵 |
 | **用户态 / libc** | 不带用户态；`lib/` 是 mini-libc；程序是 a.out ZMAGIC，`N_TXTOFF == 1024`，静态链接，没有共享库；`init` 先 exec `/etc/rc`，再 exec `/bin/sh` | 自制的 `user_lib`（没有 errno，没有 environ，没有 stdio 缓冲）；55 个测试程序，包括一个支持 `<`、`>`、`|` 且没有内建命令的 shell；应用是打包进 `fs.img` 的 RISC-V ELF | 自建 libc + shell + coreutils；ELF（已经是 ELF） |
 | **ELF / exec** | 只有 a.out **ZMAGIC**，支持 `#!` 脚本，argv/envp 放在 MAX_ARG_PAGES 上 | ELF `PT_LOAD`，带 U/R/W/X，没有 `envp`，没有 PIE/ASLR，没有 `CLOEXEC` | 完整的 `execve`，支持 envp、shebang、`CLOEXEC` |
 

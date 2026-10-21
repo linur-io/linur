@@ -13,8 +13,9 @@ The kernel crate lives in `os/`; user programs and the user library live in `use
 ## Build, Test, and Development Commands
 
 - `cd os && make run`: build and boot the kernel in `qemu-system-riscv64`.
+- `make verify`: the machine gate — build every target, run the host tests, boot the riscv64 suite, and write `verify/report.json`. `make verify-negative` proves the gate fails on a known-bad boot; `make lint` runs fmt and clippy.
 
-The pinned toolchain in `rust-toolchain.toml` includes `rustfmt`, `clippy`, LLVM tools, and the RISC-V target.
+The toolchain in `rust-toolchain.toml` includes `rustfmt`, `clippy`, LLVM tools, and the RISC-V target.
 
 ## Coding Style & Naming Conventions
 
@@ -24,4 +25,4 @@ Use Rust naming conventions: modules and functions in `snake_case`, types in `Ca
 
 ## Testing Guidelines
 
-just run `cd user && make build` and no error
+Run `make verify`; `cd user && make build` must also pass with no errors.

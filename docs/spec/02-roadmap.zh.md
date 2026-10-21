@@ -8,7 +8,7 @@
 
 1. **里程碑带 tag 和博客文章，步骤不带。** 里程碑会打 tag 并写成文章；它内部按天划分的步骤只是普通提交。
 2. **步骤以天为单位。** 任何没法在几天内老实做完的事情，都要在开工前拆开。
-3. **没有跑绿的运行，就不打 tag。** 里程碑以在干净克隆上 `just verify` 通过为终点；tag 注释里记录那次提交和那次运行。
+3. **没有跑绿的运行，就不打 tag。** 里程碑以在干净克隆上 `make verify` 通过为终点；tag 注释里记录那次提交和那次运行。
 4. **先有规格，再写代码。** 每个步骤的接口在实现之前就写下来；没写下契约的模块，之后没法交给同学负责。
 5. **清单就是契约。** `spec/03` 在 M1 开始前就存在，并由每个里程碑更新；当它没有无法解释的缺口时，v1.0 就达成了。
 6. **依赖只会往下走，绝不会往上走。** 替换掉某个 Tier-2 crate 的步骤，要在同一个 PR 里把它从 `Cargo.toml` 和 `DEPENDENCIES.md` 删掉。
@@ -33,10 +33,10 @@
 | M1.2 调试与可观测性 | panic 时带 file:line 和栈回溯；崩溃后仍能留下的启动日志；harness（测试装置）里能只跑一个失败测试的隔离；把 gdb 和 QEMU-monitor 的操作步骤写成文档；退役 `log`（这里自建的日志设施取而代之） | S |
 | M1.3a 出错安全的拷贝与错误返回 | `copy_from_user` / `copy_to_user`；`ENOSYS` / `EINVAL` / `EFAULT`；消灭全部用户出错即内核 panic 的路径；负向测试 | S |
 | M1.3b Linux ABI 与 errno | errno 化、六个参数、按架构划分的系统调用表（先做 riscv64）；`user_lib` 与全部 55 个用户程序完成迁移并全量回归 | M |
-| M1.4 最小的 `just verify` 门禁 | 构建 + 启动 + 退出码断言 + 逐个测试的报告（riscv64：SiFive test device，把 code 移到高半部分并与 0x3333 做按位或；x86_64：`isa-debug-exit`，已验证存在于 QEMU 8.2.2）+ 串口日志和报告产物；CI workflow 本身（`git submodule update --init --recursive`、缓存、串口日志与报告制品）；一个必须失败的负向测试 | S |
+| M1.4 最小的 `make verify` 门禁 | 构建 + 启动 + 退出码断言 + 逐个测试的报告（riscv64：SiFive test device，把 code 移到高半部分并与 0x3333 做按位或；x86_64：`isa-debug-exit`，已验证存在于 QEMU 8.2.2）+ 串口日志和报告产物；CI workflow 本身（`git submodule update --init --recursive`、缓存、串口日志与报告制品）；一个必须失败的负向测试 | S |
 | M1.5 x86_64 冒烟级别 bring-up（最小启动验证） | 自建 loader → 长模式 → 串口输出 → 在 CI 里干净退出；刻意**不做**用户态、不做设备、不做真正的中断处理；第一个 `hal` 接缝（seam），带两个只覆盖控制台和退出的实现；x86_64 的 compile-only CI 检查（`cargo check --target x86_64-unknown-none`，不要求启动）从这里开始，持续到 M5.4 完整移植落地 | M |
 
-**门禁。** 按架构的能力矩阵 —— 每个里程碑门禁都写明自己的矩阵，矩阵逐步扩张，直到 M5 起两个架构都跑全套件。M1：riscv64 在干净克隆上连同全套件把 `just verify` 跑绿；x86_64 跑冒烟路径（loader → 长模式 → 串口 → 干净退出）加 compile-only 检查。负向测试按要求失败；ABI 负向测试证明 `EFAULT` / `ENOSYS` 的行为；文档已提交。
+**门禁。** 按架构的能力矩阵 —— 每个里程碑门禁都写明自己的矩阵，矩阵逐步扩张，直到 M5 起两个架构都跑全套件。M1：riscv64 在干净克隆上连同全套件把 `make verify` 跑绿；x86_64 跑冒烟路径（loader → 长模式 → 串口 → 干净退出）加 compile-only 检查。负向测试按要求失败；ABI 负向测试证明 `EFAULT` / `ENOSYS` 的行为；文档已提交。
 **不在 M1 中。** 功能开发。这个里程碑存在的意义，是让它之后的一切都可测试。
 
 ### M2 存储与自主模块 / Storage and owned modules（M）→ `v0.2.0`

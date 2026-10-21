@@ -192,8 +192,8 @@ Calls linur has that 0.11 does not: the thread and synchronisation set (1000–1
 | item | Linux 0.11 | linur target | status |
 |---|---|---|---|
 | configuration | Makefile plus `config.h` | `config/<board>.toml` → generated consts | DELTA F8, TODO M5.1 |
-| test suite | none in tree | `just verify` + host tests + userland suite | TODO M1.4 |
-| CI | none | every milestone gate, both architectures | TODO M1.4 (both architectures from M5.4) |
+| test suite | none in tree | `make verify` + host tests + userland suite | DONE |
+| CI | none | every milestone gate, both architectures | WIP M1.4 → DONE M5.4 (riscv64 until the x86_64 port lands) |
 | parity evidence | — | this file, updated at each gate | WIP → DONE M6.4 |
 
 ## 11. Deltas registry
