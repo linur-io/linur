@@ -26,3 +26,7 @@ Use Rust naming conventions: modules and functions in `snake_case`, types in `Ca
 ## Testing Guidelines
 
 Run `make verify`; `cd user && make build` must also pass with no errors.
+
+## Commits
+
+One purpose per commit; a short imperative subject, no long body.
