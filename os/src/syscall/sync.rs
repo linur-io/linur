@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::errno::EINVAL;
+use crate::errno::{EDEADLK, EINVAL};
 use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore};
 use crate::task::{block_current_and_run_next, current_process, current_task};
 use crate::timer::{add_timer, get_time_ms};
 use alloc::sync::Arc;
-
-const DEADLOCK: isize = -0xdead;
 
 fn current_tid() -> usize {
     current_task()
@@ -27,7 +25,7 @@ fn get<T: Clone>(list: &[Option<T>], id: usize) -> Result<T, isize> {
 
 pub fn sys_enable_deadlock_detect(is_enable: usize) -> isize {
     if is_enable > 1 {
-        return -1;
+        return EINVAL;
     }
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
@@ -39,7 +37,7 @@ pub fn sys_enable_deadlock_detect(is_enable: usize) -> isize {
     if !process_inner.mutex_detector.is_safe_for(thread_count)
         || !process_inner.semaphore_detector.is_safe_for(thread_count)
     {
-        return -1;
+        return EDEADLK;
     }
     process_inner.deadlock_detect_enabled = true;
     0
@@ -92,7 +90,7 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
         .mutex_detector
         .request(thread_count, tid, mutex_id, detect)
     {
-        return DEADLOCK;
+        return EDEADLK;
     }
     drop(process_inner);
     mutex.lock();
@@ -167,7 +165,7 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
         .semaphore_detector
         .request(thread_count, tid, sem_id, detect)
     {
-        return DEADLOCK;
+        return EDEADLK;
     }
     drop(process_inner);
     sem.down();

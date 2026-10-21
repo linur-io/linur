@@ -110,22 +110,22 @@ Every row must end as exactly one of:
 
 ## 8. Syscall coverage
 
-0.11 defines **72 entries, numbered 0–71**, of which **13 are `-ENOSYS` stubs** (17, 26, 31, 32, 35, 38, 44, 51, 52, 53, 56, 58, 62). linur returns `ENOSYS` for unimplemented ids, which matches the stubs; the 59 implemented calls are tracked below.
+0.11 defines **72 entries, numbered 0–71**, of which **13 are `-ENOSYS` stubs** (17, 26, 31, 32, 35, 38, 44, 51, 52, 53, 56, 58, 62). linur returns `ENOSYS` for unimplemented ids, which matches the stubs; the 59 implemented calls are tracked below. Since M1.3b the ABI is Linux-shaped: up to six arguments, `-errno` on failure (the table is in `docs/errors.md` §6), and a per-architecture number→handler table.
 
 | # | syscall | linur status |
 |---|---|---|
 | 0 | `setup` | DEFER: boot-time artifact of 0.11's boot sequence, not a user-visible call |
-| 1 | `exit` | WIP M1.3 → DONE M1.3 |
+| 1 | `exit` | DONE |
 | 2 | `fork` | WIP M1.3 → DONE M4.1 (COW) |
-| 3 | `read` | WIP M1.3 → DONE M1.3 (errno semantics) |
-| 4 | `write` | WIP M1.3 → DONE M1.3 (errno semantics) |
-| 5 | `open` | WIP M1.3 → DONE M2.2 (Linux flag values) |
-| 6 | `close` | WIP M1.3 → DONE M1.3 |
+| 3 | `read` | DONE |
+| 4 | `write` | DONE |
+| 5 | `open` | WIP M1.3 → DONE M2.2 (Linux flag values; errno done at M1.3) |
+| 6 | `close` | DONE |
 | 7 | `waitpid` | WIP M1.3 → DONE M6.1 (blocking at M1.3; options at M6.1) |
 | 8 | `creat` | TODO M2.2 |
 | 9 | `link` | TODO M2.2 |
 | 10 | `unlink` | TODO M2.2 |
-| 11 | `execve` | WIP M1.3 → DONE M2.5 (envp and shebang) |
+| 11 | `execve` | WIP M1.3 → DONE M2.5 (envp and shebang; errno done at M1.3) |
 | 12 | `chdir` | TODO M2.2 |
 | 13 | `time` | WIP M1.3 → DONE M3.5: today it returns monotonic milliseconds; must return wall-clock seconds |
 | 14 | `mknod` | TODO M2.2 |
@@ -133,7 +133,7 @@ Every row must end as exactly one of:
 | 16 | `chown` | TODO M2.3 |
 | 18 | `stat` | TODO M2.2 |
 | 19 | `lseek` | TODO M2.2 |
-| 20 | `getpid` | WIP M1.3 → DONE M1.3 |
+| 20 | `getpid` | DONE |
 | 21 | `mount` | TODO M6.1 |
 | 22 | `umount` | TODO M6.1 |
 | 23 | `setuid` | TODO M6.1 |
@@ -149,8 +149,8 @@ Every row must end as exactly one of:
 | 37 | `kill` | WIP M1.3 → DONE M3.5: today a five-bit mask; must take real signal numbers (M3.2) and support groups (M3.5) |
 | 39 | `mkdir` | TODO M2.2 |
 | 40 | `rmdir` | TODO M2.2 |
-| 41 | `dup` | WIP M1.3 → DONE M1.3 |
-| 42 | `pipe` | WIP M1.3 → DONE M1.3 |
+| 41 | `dup` | DONE |
+| 42 | `pipe` | DONE |
 | 43 | `times` | TODO M3.5 |
 | 45 | `brk` | TODO M2.1 |
 | 46 | `setgid` | TODO M6.1 |

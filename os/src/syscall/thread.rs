@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::errno::{EAGAIN, EINVAL, ESRCH};
 use crate::{
-    mm::kernel_token,
+    mm::{copy_to_user, kernel_token},
     task::{TaskControlBlock, add_task, current_task},
     trap::{TrapContext, trap_handler},
 };
@@ -53,27 +54,31 @@ pub fn sys_gettid() -> isize {
         .tid as isize
 }
 
-/// thread does not exist, return -1
-/// thread has not exited yet, return -2
-/// otherwise, return thread's exit code
-pub fn sys_waittid(tid: usize) -> i32 {
+/// Reap one exited thread: its exit code goes through `exit_code_ptr` and the
+/// tid is returned, so a negative exit code can never be read as an errno.
+pub fn sys_waittid(tid: usize, exit_code_ptr: *mut i32) -> isize {
     let task = current_task().unwrap();
     let process = task.process.upgrade().unwrap();
     let task_inner = task.inner_exclusive_access();
     let mut process_inner = process.inner_exclusive_access();
     // a thread cannot wait for itself
     if task_inner.res.as_ref().unwrap().tid == tid {
-        return -1;
+        return EINVAL;
     }
     let Some(waited_task) = process_inner.tasks.get(tid).and_then(|task| task.as_ref()) else {
-        // waited thread does not exist
-        return -1;
+        return ESRCH;
     };
     let Some(exit_code) = waited_task.inner_exclusive_access().exit_code else {
-        // waited thread has not exited
-        return -2;
+        return EAGAIN;
     };
+    if let Err(e) = copy_to_user(
+        process_inner.memory_set.token(),
+        exit_code_ptr as *mut u8,
+        &exit_code.to_ne_bytes(),
+    ) {
+        return e;
+    }
     // dealloc the exited thread
     process_inner.tasks[tid] = None;
-    exit_code
+    tid as isize
 }

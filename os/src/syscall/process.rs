@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::config::USER_STACK_SIZE;
-use crate::errno::EINVAL;
+use crate::errno::{E2BIG, EAGAIN, ECHILD, EINVAL, ENAMETOOLONG, ENOENT, ENOEXEC, ESRCH};
 use crate::fs::{OpenFlags, open_file};
 use crate::mm::{copy_from_user, copy_to_user, translated_str};
 use crate::task::{
@@ -12,6 +12,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::size_of;
+use easy_fs::NAME_LENGTH_LIMIT;
 
 pub fn sys_exit(exit_code: i32) -> ! {
     exit_current_and_run_next(exit_code);
@@ -57,6 +58,12 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         Ok(path) => path,
         Err(e) => return e,
     };
+    if path.is_empty() {
+        return ENOENT;
+    }
+    if path.len() > NAME_LENGTH_LIMIT {
+        return ENAMETOOLONG;
+    }
     let mut args_vec: Vec<String> = Vec::new();
     // The argv array and the strings share the user stack, so the stack bounds
     // them; bounding them here also bounds the kernel memory they occupy.
@@ -76,7 +83,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         };
         argv_bytes += arg.len() + 1 + size_of::<usize>();
         if argv_bytes + size_of::<usize>() > USER_STACK_SIZE {
-            return EINVAL;
+            return E2BIG;
         }
         args_vec.push(arg);
         unsafe {
@@ -93,17 +100,18 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         }
         let argc = args_vec.len();
         if !process.exec(all_data.as_slice(), args_vec) {
-            return EINVAL;
+            return ENOEXEC;
         }
         // return argc because cx.x[10] will be covered with it later
         argc as isize
     } else {
-        -1
+        ENOENT
     }
 }
 
-/// If there is not a child process whose pid is same as given, return -1.
-/// Else if there is a child process but it is still running, return -2.
+/// Reap one child: returns its pid with the exit code written through
+/// `exit_code_ptr`, `-ECHILD` when there is no such child, or `-EAGAIN` while
+/// it still runs.
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     let process = current_process();
     // find a child process
@@ -113,7 +121,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         .iter()
         .any(|p| pid == -1 || pid as usize == p.getpid())
     {
-        return -1;
+        return ECHILD;
         // ---- release current PCB
     }
     let found = inner.children.iter().enumerate().find(|(_, p)| {
@@ -122,7 +130,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         // ++++ release child PCB
     });
     let Some((idx, _)) = found else {
-        return -2;
+        return EAGAIN;
     };
     let found_pid = inner.children[idx].getpid();
     let exit_code = inner.children[idx].inner_exclusive_access().exit_code;
@@ -147,9 +155,9 @@ pub fn sys_kill(pid: usize, signal: u32) -> isize {
             process.inner_exclusive_access().signals |= flag;
             0
         } else {
-            -1
+            EINVAL
         }
     } else {
-        -1
+        ESRCH
     }
 }

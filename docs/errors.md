@@ -1,6 +1,6 @@
-# linur — syscall error returns and fault-safe user copies (M1.3a)
+# linur — syscall errors, fault-safe copies, and the errno ABI (M1.3a/M1.3b)
 
-Status: M1.3a interface contract. Read with `spec/02` (M1.3a deliverable) and
+Status: interface contract for M1.3a and §6 for M1.3b. Read with `spec/02` (M1.3a deliverable) and
 `spec/01` §3, §6. The full Linux-shaped ABI — six arguments, per-arch tables,
 errno for every call — is M1.3b; this step only removes the ways a user program
 can panic the kernel with a bad argument.
@@ -9,7 +9,7 @@ can panic the kernel with a bad argument.
 
 * A user pointer is validated before the kernel dereferences it. An invalid
   argument produces a negative error return instead of a panic.
-* Exactly three error numbers enter the ABI:
+* M1.3a introduced three error numbers (M1.3b added the rest, §6):
 
 | name | value | returned when |
 |---|---|---|
@@ -17,11 +17,9 @@ can panic the kernel with a bad argument.
 | `EINVAL` | −22 | known call, invalid argument: unknown `open` flag bits, invalid sync-object id, malformed executable, `argv` larger than the user stack, `fork`/`exec` from a multithreaded process |
 | `EFAULT` | −14 | the pointer range is not mapped, not user-accessible, or not writable where the kernel writes |
 
-* The remaining `-1` / `-2` sentinels keep their current meaning:
-  `waitpid` −1 no such child, −2 not exited yet; `waittid` −1/−2; `open` −1
-  not found; `kill` −1; `-0xdead` deadlock. They are converted to errno as a
-  whole in M1.3b, together with `user_lib` and all 55 programs, because the
-  conversion breaks every consumer of those sentinels.
+* M1.3a kept the `-1` / `-2` sentinels (`waitpid` −1 no such child, −2 not
+  exited yet; `waittid`; `open`; `kill`; `-0xdead` deadlock). M1.3b replaced
+  all of them with errno (§6), together with the userland migration.
 
 ## 2. Copy layer — `os/src/mm/user.rs`
 
@@ -72,13 +70,13 @@ Every row is reachable from user space and used to kill the kernel.
 | 2 | bad user pointer in any copy helper (`mm/user.rs`) | `unwrap()` | `EFAULT` |
 | 3 | unknown `open` flag bits (`syscall/fs.rs`) | `from_bits().unwrap()` | `EINVAL` |
 | 4 | invalid mutex/semaphore/condvar id (`syscall/sync.rs`) | index + `unwrap()` | `EINVAL` |
-| 5 | `waittid` with an out-of-range tid (`syscall/thread.rs`) | index | −1 |
+| 5 | `waittid` with an out-of-range tid (`syscall/thread.rs`) | index | −`ESRCH` |
 | 6 | `read(0, buf, len != 1)` (`fs/stdio.rs`) | `assert` | one-byte partial read; `len == 0` returns 0 |
 | 7 | `write(1, non-UTF-8)` (`fs/stdio.rs`) | `from_utf8().unwrap()` | bytes written verbatim |
 | 8 | `fork`/`exec` from a multithreaded process (`process.rs`) | `assert` | `EINVAL` |
-| 9 | `exec` of a malformed or non-ELF file (`mm/memory_set.rs`) | `unwrap()`/`assert` | `EINVAL` (`ENOEXEC` in M2.5) |
-| 10 | `exec` with `argv` larger than the user stack (`task/process.rs`) | stack underflow panic | `EINVAL` (`E2BIG` in M1.3b) |
-| 11 | `open`/`link` with a name longer than the on-disk limit (`easy-fs`) | slice panic | −1 (`ENAMETOOLONG` when the real VFS lands in M2.2) |
+| 9 | `exec` of a malformed or non-ELF file (`mm/memory_set.rs`) | `unwrap()`/`assert` | `−ENOEXEC` |
+| 10 | `exec` with `argv` larger than the user stack (`task/process.rs`) | stack underflow panic | `−E2BIG` |
+| 11 | `open`/`link` with a name longer than the on-disk limit (`easy-fs`) | slice panic | `−ENAMETOOLONG` (the real VFS keeps it at M2.2) |
 | 12 | `ebreak` in user mode (`trap/mod.rs`) | "unsupported trap" panic | `SIGILL` |
 | 13 | double unlock of a blocking mutex (`sync/mutex.rs`) | `assert` | no-op |
 | 14 | unlock/up of an object the caller never held, including a negative detector count (`task/process.rs`) | index panic / underflow | no accounting change |
@@ -100,3 +98,42 @@ flags, invalid sync ids, malformed ELF, `fork` and `exec` from a thread) and the
 no-panic cases (`waittid` out of range, over-long file name, releasing an unheld
 mutex or semaphore). Each case prints `syscall_errors: ok <name>` or `FAIL`; the
 tally is the program's exit code.
+
+## 6. M1.3b — the errno ABI, six arguments, per-arch tables
+
+The kernel boundary is Linux's convention: a call returns a non-negative result
+on success and `-errno` on failure. The `-1`/`-2` sentinels of §1 are gone.
+
+**Arguments.** Up to six: `a0`–`a5` (`x10`–`x15`), number in `a7` (`x17`),
+result in `a0`. The handlers are the shared semantic core; the number→handler
+table is per architecture — `os/src/syscall/table.rs` holds the riscv64 table
+(x86_64 numbers differ and arrive with the M5.4 port).
+
+**Error values.**
+
+| value | name | produced by |
+|---|---|---|
+| −2 | `ENOENT` | `open`/`exec`: no such file; `open("")` |
+| −3 | `ESRCH` | `kill`/`waittid`: no such process or thread |
+| −7 | `E2BIG` | `exec`: `argv` does not fit the user stack |
+| −8 | `ENOEXEC` | `exec`: not a loadable ELF image |
+| −9 | `EBADF` | `read`/`write`/`close`/`dup`: bad descriptor |
+| −10 | `ECHILD` | `waitpid`: no such child |
+| −11 | `EAGAIN` | `waitpid`/`waittid`: child or thread has not exited |
+| −14 | `EFAULT` | the pointer range is not accessible (see §2) |
+| −22 | `EINVAL` | bad flag bits, object id, signal, or multithreaded `fork`/`exec` |
+| −35 | `EDEADLK` | the deadlock detector refuses the request |
+| −36 | `ENAMETOOLONG` | a name longer than one directory entry |
+| −38 | `ENOSYS` | unknown syscall number |
+
+**`waittid` takes a status pointer**, like `waitpid`: `waittid(tid, int *status)`
+returns the tid. An exit code is therefore never the syscall result, so a
+negative status (the thread was killed by a signal) cannot be mistaken for an
+errno — `-EAGAIN` is 11 and `-SIGSEGV` is also 11.
+
+**libc layer.** The kernel returns `-errno`; `user_lib` returns POSIX: `-1` on
+failure and the reason in `errno()`. That is why most of the 55 programs needed
+no change, and it is the layer the migration touched: the `wait`/`waitpid`/
+`waittid` wrappers loop on `EAGAIN` and return `-1` otherwise; the three ch8
+deadlock tests test `errno() == EDEADLK`. `errno` is one global until the real
+per-thread libc (M3.3).

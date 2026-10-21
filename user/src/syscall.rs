@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::errno;
 use core::arch::asm;
 
 const SYSCALL_DUP: usize = 24;
@@ -30,7 +31,8 @@ const SYSCALL_CONDVAR_CREATE: usize = 1030;
 const SYSCALL_CONDVAR_SIGNAL: usize = 1031;
 const SYSCALL_CONDVAR_WAIT: usize = 1032;
 
-fn syscall(id: usize, args: [usize; 3]) -> isize {
+/// Enter the kernel and turn `-errno` into `-1` plus [`errno`].
+fn syscall(id: usize, args: [usize; 6]) -> isize {
     let mut ret: isize;
     unsafe {
         asm!(
@@ -38,127 +40,147 @@ fn syscall(id: usize, args: [usize; 3]) -> isize {
             inlateout("x10") args[0] => ret,
             in("x11") args[1],
             in("x12") args[2],
+            in("x13") args[3],
+            in("x14") args[4],
+            in("x15") args[5],
             in("x17") id
         );
     }
-    ret
+    if ret < 0 {
+        errno::set(-ret);
+        -1
+    } else {
+        ret
+    }
 }
 
 pub fn sys_dup(fd: usize) -> isize {
-    syscall(SYSCALL_DUP, [fd, 0, 0])
+    syscall(SYSCALL_DUP, [fd, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_open(path: &str, flags: u32) -> isize {
-    syscall(SYSCALL_OPEN, [path.as_ptr() as usize, flags as usize, 0])
+    syscall(
+        SYSCALL_OPEN,
+        [path.as_ptr() as usize, flags as usize, 0, 0, 0, 0],
+    )
 }
 
 pub fn sys_close(fd: usize) -> isize {
-    syscall(SYSCALL_CLOSE, [fd, 0, 0])
+    syscall(SYSCALL_CLOSE, [fd, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_pipe(pipe: &mut [usize]) -> isize {
-    syscall(SYSCALL_PIPE, [pipe.as_mut_ptr() as usize, 0, 0])
+    syscall(SYSCALL_PIPE, [pipe.as_mut_ptr() as usize, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_read(fd: usize, buffer: &mut [u8]) -> isize {
     syscall(
         SYSCALL_READ,
-        [fd, buffer.as_mut_ptr() as usize, buffer.len()],
+        [fd, buffer.as_mut_ptr() as usize, buffer.len(), 0, 0, 0],
     )
 }
 
 pub fn sys_write(fd: usize, buffer: &[u8]) -> isize {
-    syscall(SYSCALL_WRITE, [fd, buffer.as_ptr() as usize, buffer.len()])
+    syscall(
+        SYSCALL_WRITE,
+        [fd, buffer.as_ptr() as usize, buffer.len(), 0, 0, 0],
+    )
 }
 
 pub fn sys_exit(exit_code: i32) -> ! {
-    syscall(SYSCALL_EXIT, [exit_code as usize, 0, 0]);
+    syscall(SYSCALL_EXIT, [exit_code as usize, 0, 0, 0, 0, 0]);
     panic!("sys_exit never returns!");
 }
 
 pub fn sys_sleep(sleep_ms: usize) -> isize {
-    syscall(SYSCALL_SLEEP, [sleep_ms, 0, 0])
+    syscall(SYSCALL_SLEEP, [sleep_ms, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_yield() -> isize {
-    syscall(SYSCALL_YIELD, [0, 0, 0])
+    syscall(SYSCALL_YIELD, [0, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_kill(pid: usize, signal: i32) -> isize {
-    syscall(SYSCALL_KILL, [pid, signal as usize, 0])
+    syscall(SYSCALL_KILL, [pid, signal as usize, 0, 0, 0, 0])
 }
 
 pub fn sys_get_time() -> isize {
-    syscall(SYSCALL_GET_TIME, [0, 0, 0])
+    syscall(SYSCALL_GET_TIME, [0, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_getpid() -> isize {
-    syscall(SYSCALL_GETPID, [0, 0, 0])
+    syscall(SYSCALL_GETPID, [0, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_fork() -> isize {
-    syscall(SYSCALL_FORK, [0, 0, 0])
+    syscall(SYSCALL_FORK, [0, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_exec(path: &str, args: &[*const u8]) -> isize {
     syscall(
         SYSCALL_EXEC,
-        [path.as_ptr() as usize, args.as_ptr() as usize, 0],
+        [path.as_ptr() as usize, args.as_ptr() as usize, 0, 0, 0, 0],
     )
 }
 
 pub fn sys_waitpid(pid: isize, exit_code: *mut i32) -> isize {
-    syscall(SYSCALL_WAITPID, [pid as usize, exit_code as usize, 0])
+    syscall(
+        SYSCALL_WAITPID,
+        [pid as usize, exit_code as usize, 0, 0, 0, 0],
+    )
 }
 
 pub fn sys_enable_deadlock_detect(is_enable: bool) -> isize {
-    syscall(SYSCALL_ENABLE_DEADLOCK_DETECT, [is_enable as usize, 0, 0])
+    syscall(
+        SYSCALL_ENABLE_DEADLOCK_DETECT,
+        [is_enable as usize, 0, 0, 0, 0, 0],
+    )
 }
 
 pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
-    syscall(SYSCALL_THREAD_CREATE, [entry, arg, 0])
+    syscall(SYSCALL_THREAD_CREATE, [entry, arg, 0, 0, 0, 0])
 }
 
 pub fn sys_gettid() -> isize {
-    syscall(SYSCALL_GETTID, [0; 3])
+    syscall(SYSCALL_GETTID, [0; 6])
 }
 
-pub fn sys_waittid(tid: usize) -> isize {
-    syscall(SYSCALL_WAITTID, [tid, 0, 0])
+pub fn sys_waittid(tid: usize, exit_code: *mut i32) -> isize {
+    syscall(SYSCALL_WAITTID, [tid, exit_code as usize, 0, 0, 0, 0])
 }
 
 pub fn sys_mutex_create(blocking: bool) -> isize {
-    syscall(SYSCALL_MUTEX_CREATE, [blocking as usize, 0, 0])
+    syscall(SYSCALL_MUTEX_CREATE, [blocking as usize, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_mutex_lock(id: usize) -> isize {
-    syscall(SYSCALL_MUTEX_LOCK, [id, 0, 0])
+    syscall(SYSCALL_MUTEX_LOCK, [id, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_mutex_unlock(id: usize) -> isize {
-    syscall(SYSCALL_MUTEX_UNLOCK, [id, 0, 0])
+    syscall(SYSCALL_MUTEX_UNLOCK, [id, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_semaphore_create(res_count: usize) -> isize {
-    syscall(SYSCALL_SEMAPHORE_CREATE, [res_count, 0, 0])
+    syscall(SYSCALL_SEMAPHORE_CREATE, [res_count, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_semaphore_up(sem_id: usize) -> isize {
-    syscall(SYSCALL_SEMAPHORE_UP, [sem_id, 0, 0])
+    syscall(SYSCALL_SEMAPHORE_UP, [sem_id, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_semaphore_down(sem_id: usize) -> isize {
-    syscall(SYSCALL_SEMAPHORE_DOWN, [sem_id, 0, 0])
+    syscall(SYSCALL_SEMAPHORE_DOWN, [sem_id, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_condvar_create() -> isize {
-    syscall(SYSCALL_CONDVAR_CREATE, [0, 0, 0])
+    syscall(SYSCALL_CONDVAR_CREATE, [0, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_condvar_signal(condvar_id: usize) -> isize {
-    syscall(SYSCALL_CONDVAR_SIGNAL, [condvar_id, 0, 0])
+    syscall(SYSCALL_CONDVAR_SIGNAL, [condvar_id, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
-    syscall(SYSCALL_CONDVAR_WAIT, [condvar_id, mutex_id, 0])
+    syscall(SYSCALL_CONDVAR_WAIT, [condvar_id, mutex_id, 0, 0, 0, 0])
 }

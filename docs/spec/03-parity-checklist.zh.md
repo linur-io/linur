@@ -111,22 +111,22 @@
 
 ## 8. 系统调用覆盖
 
-0.11 定义了 **72 个条目，编号 0–71**，其中 **13 个是 `-ENOSYS` 桩**（17, 26, 31, 32, 35, 38, 44, 51, 52, 53, 56, 58, 62）。linur 对未实现的编号返回 `ENOSYS`，这与那些桩一致；已实现的 59 个调用在下表中跟踪。
+0.11 定义了 **72 个条目，编号 0–71**，其中 **13 个是 `-ENOSYS` 桩**（17, 26, 31, 32, 35, 38, 44, 51, 52, 53, 56, 58, 62）。linur 对未实现的编号返回 `ENOSYS`，这与那些桩一致；已实现的 59 个调用在下表中跟踪。自 M1.3b 起 ABI 采用 Linux 形状：最多六个参数，失败返回 `-errno`（数值表见 `docs/errors.md` §6），分派表按架构划分。
 
 | # | 系统调用 | linur 状态 |
 |---|---|---|
 | 0 | `setup` | DEFER：0.11 启动序列的启动期产物，不是用户可见的调用 |
-| 1 | `exit` | WIP M1.3 → DONE M1.3 |
+| 1 | `exit` | DONE |
 | 2 | `fork` | WIP M1.3 → DONE M4.1（COW） |
-| 3 | `read` | WIP M1.3 → DONE M1.3（errno 语义） |
-| 4 | `write` | WIP M1.3 → DONE M1.3（errno 语义） |
-| 5 | `open` | WIP M1.3 → DONE M2.2（Linux 的标志值） |
-| 6 | `close` | WIP M1.3 → DONE M1.3 |
+| 3 | `read` | DONE |
+| 4 | `write` | DONE |
+| 5 | `open` | WIP M1.3 → DONE M2.2（Linux 的标志值；errno 已在 M1.3 完成） |
+| 6 | `close` | DONE |
 | 7 | `waitpid` | WIP M1.3 → DONE M6.1（M1.3 起阻塞；选项在 M6.1） |
 | 8 | `creat` | TODO M2.2 |
 | 9 | `link` | TODO M2.2 |
 | 10 | `unlink` | TODO M2.2 |
-| 11 | `execve` | WIP M1.3 → DONE M2.5（envp 与 shebang） |
+| 11 | `execve` | WIP M1.3 → DONE M2.5（envp 与 shebang；errno 已在 M1.3 完成） |
 | 12 | `chdir` | TODO M2.2 |
 | 13 | `time` | WIP M1.3 → DONE M3.5：目前返回单调毫秒；必须返回墙上时钟的秒数 |
 | 14 | `mknod` | TODO M2.2 |
@@ -134,7 +134,7 @@
 | 16 | `chown` | TODO M2.3 |
 | 18 | `stat` | TODO M2.2 |
 | 19 | `lseek` | TODO M2.2 |
-| 20 | `getpid` | WIP M1.3 → DONE M1.3 |
+| 20 | `getpid` | DONE |
 | 21 | `mount` | TODO M6.1 |
 | 22 | `umount` | TODO M6.1 |
 | 23 | `setuid` | TODO M6.1 |
@@ -150,8 +150,8 @@
 | 37 | `kill` | WIP M1.3 → DONE M3.5：目前是五位掩码；必须接受真正的信号编号（M3.2）并支持进程组（M3.5） |
 | 39 | `mkdir` | TODO M2.2 |
 | 40 | `rmdir` | TODO M2.2 |
-| 41 | `dup` | WIP M1.3 → DONE M1.3 |
-| 42 | `pipe` | WIP M1.3 → DONE M1.3 |
+| 41 | `dup` | DONE |
+| 42 | `pipe` | DONE |
 | 43 | `times` | TODO M3.5 |
 | 45 | `brk` | TODO M2.1 |
 | 46 | `setgid` | TODO M6.1 |

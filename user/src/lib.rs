@@ -10,8 +10,14 @@ macro_rules! linker_symbol_addr {
 
 #[macro_use]
 pub mod console;
+mod errno;
 mod lang_items;
 mod syscall;
+
+pub use errno::{
+    E2BIG, EAGAIN, EBADF, ECHILD, EDEADLK, EFAULT, EINVAL, ENAMETOOLONG, ENOENT, ENOEXEC, ENOSYS,
+    ESRCH, errno,
+};
 
 extern crate alloc;
 #[macro_use]
@@ -105,27 +111,29 @@ pub fn fork() -> isize {
 pub fn exec(path: &str, args: &[*const u8]) -> isize {
     sys_exec(path, args)
 }
+/// Reap any child, blocking by yielding while it still runs.
 pub fn wait(exit_code: &mut i32) -> isize {
     loop {
-        match sys_waitpid(-1, exit_code as *mut _) {
-            -2 => {
-                yield_();
-            }
-            // -1 or a real pid
-            exit_pid => return exit_pid,
+        let exit_pid = sys_waitpid(-1, exit_code as *mut _);
+        if exit_pid == -1 && errno() == EAGAIN {
+            yield_();
+            continue;
         }
+        // -1 on any other error, or the pid of the reaped child
+        return exit_pid;
     }
 }
 
+/// Reap one child, blocking by yielding while it still runs.
 pub fn waitpid(pid: usize, exit_code: &mut i32) -> isize {
     loop {
-        match sys_waitpid(pid as isize, exit_code as *mut _) {
-            -2 => {
-                yield_();
-            }
-            // -1 or a real pid
-            exit_pid => return exit_pid,
+        let exit_pid = sys_waitpid(pid as isize, exit_code as *mut _);
+        if exit_pid == -1 && errno() == EAGAIN {
+            yield_();
+            continue;
         }
+        // -1 on any other error, or the pid of the reaped child
+        return exit_pid;
     }
 }
 
@@ -157,14 +165,20 @@ pub fn thread_create(entry: usize, arg: usize) -> isize {
 pub fn gettid() -> isize {
     sys_gettid()
 }
+/// Join a thread, blocking by yielding while it still runs. Returns its exit
+/// code, or -1 with `errno()` set.
 pub fn waittid(tid: usize) -> isize {
+    let mut status: i32 = 0;
     loop {
-        match sys_waittid(tid) {
-            -2 => {
-                yield_();
-            }
-            exit_code => return exit_code,
+        let ret = sys_waittid(tid, &mut status);
+        if ret == -1 && errno() == EAGAIN {
+            yield_();
+            continue;
         }
+        if ret < 0 {
+            return ret;
+        }
+        return status as isize;
     }
 }
 

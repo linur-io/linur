@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::errno::EINVAL;
+use crate::errno::{EBADF, EINVAL, ENAMETOOLONG, ENOENT};
 use crate::fs::{OpenFlags, make_pipe, open_file};
 use crate::mm::{copy_to_user, translated_byte_buffer, translated_byte_buffer_mut, translated_str};
 use crate::task::{current_process, current_user_token};
 use alloc::sync::Arc;
+use easy_fs::NAME_LENGTH_LIMIT;
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     let token = current_user_token();
     let process = current_process();
     let inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
-        return -1;
+        return EBADF;
     }
     if let Some(file) = &inner.fd_table[fd] {
         if !file.writable() {
-            return -1;
+            return EBADF;
         }
         let file = file.clone();
         // release current task TCB manually to avoid multi-borrow
@@ -25,7 +26,7 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
         };
         file.write(buffer) as isize
     } else {
-        -1
+        EBADF
     }
 }
 
@@ -34,12 +35,12 @@ pub fn sys_read(fd: usize, buf: *mut u8, len: usize) -> isize {
     let process = current_process();
     let inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
-        return -1;
+        return EBADF;
     }
     if let Some(file) = &inner.fd_table[fd] {
         let file = file.clone();
         if !file.readable() {
-            return -1;
+            return EBADF;
         }
         // release current task TCB manually to avoid multi-borrow
         drop(inner);
@@ -49,7 +50,7 @@ pub fn sys_read(fd: usize, buf: *mut u8, len: usize) -> isize {
         };
         file.read(buffer) as isize
     } else {
-        -1
+        EBADF
     }
 }
 
@@ -63,13 +64,19 @@ pub fn sys_open(path: *const u8, flags: u32) -> isize {
     let Some(flags) = OpenFlags::from_bits(flags) else {
         return EINVAL;
     };
+    if path.is_empty() {
+        return ENOENT;
+    }
+    if path.len() > NAME_LENGTH_LIMIT {
+        return ENAMETOOLONG;
+    }
     if let Some(inode) = open_file(path.as_str(), flags) {
         let mut inner = process.inner_exclusive_access();
         let fd = inner.alloc_fd();
         inner.fd_table[fd] = Some(inode);
         fd as isize
     } else {
-        -1
+        ENOENT
     }
 }
 
@@ -77,10 +84,10 @@ pub fn sys_close(fd: usize) -> isize {
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
-        return -1;
+        return EBADF;
     }
     if inner.fd_table[fd].is_none() {
-        return -1;
+        return EBADF;
     }
     inner.fd_table[fd].take();
     0
@@ -115,10 +122,10 @@ pub fn sys_dup(fd: usize) -> isize {
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
-        return -1;
+        return EBADF;
     }
     if inner.fd_table[fd].is_none() {
-        return -1;
+        return EBADF;
     }
     let new_fd = inner.alloc_fd();
     inner.fd_table[new_fd] = Some(Arc::clone(inner.fd_table[fd].as_ref().unwrap()));

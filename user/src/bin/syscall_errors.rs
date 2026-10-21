@@ -7,19 +7,19 @@ extern crate user_lib;
 
 use core::arch::asm;
 use user_lib::{
-    OpenFlags, close, exec, exit, fork, mutex_create, open, semaphore_create, thread_create,
+    EBADF, ECHILD, EFAULT, EINVAL, ENAMETOOLONG, ENOENT, ENOEXEC, ENOSYS, ESRCH, OpenFlags, close,
+    errno, exec, exit, fork, mutex_create, mutex_lock, open, semaphore_create, thread_create,
     waittid, write,
 };
 
-const ENOSYS: isize = -38;
-const EINVAL: isize = -22;
-const EFAULT: isize = -14;
-
+const SYSCALL_DUP: usize = 24;
 const SYSCALL_OPEN: usize = 56;
+const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_PIPE: usize = 59;
 const SYSCALL_READ: usize = 63;
 const SYSCALL_WRITE: usize = 64;
 const SYSCALL_EXEC: usize = 221;
+const SYSCALL_WAITPID: usize = 260;
 const SYSCALL_WAITTID: usize = 1002;
 const SYSCALL_MUTEX_LOCK: usize = 1011;
 const SYSCALL_MUTEX_UNLOCK: usize = 1012;
@@ -49,6 +49,11 @@ fn raw(id: usize, a0: usize, a1: usize, a2: usize) -> isize {
     ret
 }
 
+/// The kernel error return for `errno` `e`.
+const fn neg(e: i32) -> isize {
+    -(e as isize)
+}
+
 /// Record one expectation and count the matches.
 fn check(name: &str, got: isize, want: isize, passed: &mut usize) {
     if got == want {
@@ -59,47 +64,68 @@ fn check(name: &str, got: isize, want: isize, passed: &mut usize) {
     }
 }
 
-/// Runs the 15 negative cases; returns 0 only if all match.
+/// Record one libc-layer expectation; reads errno() on entry, before any output.
+fn check_errno(name: &str, got: isize, want: isize, want_errno: i32, passed: &mut usize) {
+    let err = errno();
+    if got == want && err == want_errno {
+        println!("syscall_errors: ok {}", name);
+        *passed += 1;
+    } else {
+        println!(
+            "syscall_errors: FAIL {}: got {} errno {}, want {} errno {}",
+            name, got, err, want, want_errno
+        );
+    }
+}
+
+/// Runs the 25 cases; returns 0 only if all match.
 #[unsafe(no_mangle)]
 pub fn main() -> i32 {
     let mut passed = 0usize;
     let argv = [core::ptr::null::<u8>()];
+    let mut status: i32 = 0;
 
-    check("unknown syscall id", raw(999, 0, 0, 0), ENOSYS, &mut passed);
+    // Raw ecall: the kernel ABI, -errno on failure.
+    check(
+        "unknown syscall id",
+        raw(999, 0, 0, 0),
+        neg(ENOSYS),
+        &mut passed,
+    );
     check(
         "write bad pointer",
         raw(SYSCALL_WRITE, 1, BAD, 1),
-        EFAULT,
+        neg(EFAULT),
         &mut passed,
     );
     check(
         "read bad pointer",
         raw(SYSCALL_READ, 0, BAD, 1),
-        EFAULT,
+        neg(EFAULT),
         &mut passed,
     );
     check(
         "pipe bad pointer",
         raw(SYSCALL_PIPE, BAD, 0, 0),
-        EFAULT,
+        neg(EFAULT),
         &mut passed,
     );
     check(
         "exec bad path",
         raw(SYSCALL_EXEC, BAD, argv.as_ptr() as usize, 0),
-        EFAULT,
+        neg(EFAULT),
         &mut passed,
     );
     check(
         "write trampoline",
         raw(SYSCALL_WRITE, 1, TRAMPOLINE, 1),
-        EFAULT,
+        neg(EFAULT),
         &mut passed,
     );
     check(
         "read into a read-only page",
         raw(SYSCALL_READ, 0, b"rodata\0".as_ptr() as usize, 1),
-        EFAULT,
+        neg(EFAULT),
         &mut passed,
     );
     check(
@@ -110,62 +136,72 @@ pub fn main() -> i32 {
             0xffff_ffff,
             0,
         ),
-        EINVAL,
+        neg(EINVAL),
         &mut passed,
     );
     check(
         "mutex_lock no such mutex",
         raw(SYSCALL_MUTEX_LOCK, 999, 0, 0),
-        EINVAL,
+        neg(EINVAL),
         &mut passed,
     );
     check(
         "mutex_unlock no such mutex",
         raw(SYSCALL_MUTEX_UNLOCK, 999, 0, 0),
-        EINVAL,
+        neg(EINVAL),
         &mut passed,
     );
     check(
         "semaphore_down no such semaphore",
         raw(SYSCALL_SEMAPHORE_DOWN, 999, 0, 0),
-        EINVAL,
+        neg(EINVAL),
         &mut passed,
     );
     check(
         "condvar_signal no such condvar",
         raw(SYSCALL_CONDVAR_SIGNAL, 999, 0, 0),
-        EINVAL,
+        neg(EINVAL),
         &mut passed,
     );
     check(
         "waittid no such thread",
-        raw(SYSCALL_WAITTID, 999, 0, 0),
-        -1,
+        raw(SYSCALL_WAITTID, 999, &mut status as *mut i32 as usize, 0),
+        neg(ESRCH),
         &mut passed,
     );
-
     check(
         "open 40-byte name",
-        open(LONG_NAME, OpenFlags::CREATE | OpenFlags::WRONLY),
-        -1,
+        raw(
+            SYSCALL_OPEN,
+            LONG_NAME.as_ptr() as usize,
+            (OpenFlags::CREATE | OpenFlags::WRONLY).bits() as usize,
+            0,
+        ),
+        neg(ENAMETOOLONG),
         &mut passed,
     );
 
+    // A file that exists but is not an ELF image.
     let fd = open("badelf\0", OpenFlags::CREATE | OpenFlags::WRONLY);
     write(fd as usize, b"not an elf");
     close(fd as usize);
     check(
         "exec malformed elf",
-        exec("badelf\0", &argv),
-        EINVAL,
+        raw(
+            SYSCALL_EXEC,
+            b"badelf\0".as_ptr() as usize,
+            argv.as_ptr() as usize,
+            0,
+        ),
+        neg(ENOEXEC),
         &mut passed,
     );
 
     // Releasing something never held must not panic: it changes nothing.
-    let mutex = mutex_create();
+    let mid = mutex_create();
     check(
         "unlock an unheld mutex",
-        raw(SYSCALL_MUTEX_UNLOCK, mutex as usize, 0, 0),
+        raw(SYSCALL_MUTEX_UNLOCK, mid as usize, 0, 0),
         0,
         &mut passed,
     );
@@ -177,6 +213,7 @@ pub fn main() -> i32 {
         &mut passed,
     );
 
+    // fork and exec from a thread are EINVAL.
     let tid = thread_create(linker_symbol_addr!(entry), 0);
     check(
         "fork and exec in thread",
@@ -185,13 +222,67 @@ pub fn main() -> i32 {
         &mut passed,
     );
 
-    println!("syscall_errors: {}/{} passed", passed, 18);
-    if passed == 18 { 0 } else { 1 }
+    check(
+        "close bad fd",
+        raw(SYSCALL_CLOSE, 999, 0, 0),
+        neg(EBADF),
+        &mut passed,
+    );
+    check(
+        "dup bad fd",
+        raw(SYSCALL_DUP, 999, 0, 0),
+        neg(EBADF),
+        &mut passed,
+    );
+    let mut byte = [0u8; 1];
+    check(
+        "read bad fd",
+        raw(SYSCALL_READ, 999, byte.as_mut_ptr() as usize, 1),
+        neg(EBADF),
+        &mut passed,
+    );
+    check(
+        "waitpid no children",
+        raw(
+            SYSCALL_WAITPID,
+            -1isize as usize,
+            &mut status as *mut i32 as usize,
+            0,
+        ),
+        neg(ECHILD),
+        &mut passed,
+    );
+
+    // libc layer: -1 plus errno().
+    check_errno(
+        "open no such file",
+        open("no_such_file\0", OpenFlags::RDONLY),
+        -1,
+        ENOENT,
+        &mut passed,
+    );
+    check_errno(
+        "mutex_lock no such mutex",
+        mutex_lock(999),
+        -1,
+        EINVAL,
+        &mut passed,
+    );
+    check_errno(
+        "waittid no such thread",
+        waittid(999),
+        -1,
+        ESRCH,
+        &mut passed,
+    );
+
+    println!("syscall_errors: {}/25 passed", passed);
+    if passed == 25 { 0 } else { 1 }
 }
 
-/// Thread body: fork and exec outside the main thread must fail with EINVAL.
+/// Thread body: fork and exec outside the main thread fail with EINVAL.
 fn entry() -> ! {
-    let fork_err = fork() == EINVAL;
-    let exec_err = exec("hello_world\0", &[core::ptr::null::<u8>()]) == EINVAL;
+    let fork_err = fork() == -1 && errno() == EINVAL;
+    let exec_err = exec("hello_world\0", &[core::ptr::null::<u8>()]) == -1 && errno() == EINVAL;
     exit(if fork_err && exec_err { 0 } else { 1 })
 }

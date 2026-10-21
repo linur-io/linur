@@ -8,7 +8,8 @@ extern crate user_lib;
 extern crate alloc;
 
 use user_lib::{
-    enable_deadlock_detect, exit, semaphore_create, semaphore_down, semaphore_up, sleep,
+    EDEADLK, enable_deadlock_detect, errno, exit, semaphore_create, semaphore_down, semaphore_up,
+    sleep,
 };
 use user_lib::{gettid, thread_create, waittid};
 
@@ -24,7 +25,7 @@ const RES_NUM: [usize; RES_TYPE] = [1, 2, 1];
 const REQUEST: [Option<usize>; THREAD_N] = [Some(1), Some(3), Some(2)];
 
 fn try_sem_down(sem_id: usize) {
-    if semaphore_down(sem_id) == -0xdead {
+    if semaphore_down(sem_id) == -1 && errno() == EDEADLK {
         sem_dealloc(gettid() as usize);
         println!("Deadlock detected. Test 08_sem1 failed!");
         exit(-1);
