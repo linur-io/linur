@@ -36,14 +36,14 @@ impl Drop for CacheData {
 
 impl AsRef<[u8]> for CacheData {
     fn as_ref(&self) -> &[u8] {
-        let ptr = self.0.as_ptr() as *const u8;
+        let ptr = self.0.as_ptr();
         unsafe { slice::from_raw_parts(ptr, BLOCK_SZ) }
     }
 }
 
 impl AsMut<[u8]> for CacheData {
     fn as_mut(&mut self) -> &mut [u8] {
-        let ptr = self.0.as_mut_ptr() as *mut u8;
+        let ptr = self.0.as_mut_ptr();
         unsafe { slice::from_raw_parts_mut(ptr, BLOCK_SZ) }
     }
 }

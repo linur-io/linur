@@ -113,12 +113,12 @@ impl DiskInode {
         Self::_data_blocks(self.size)
     }
     fn _data_blocks(size: u32) -> u32 {
-        (size + BLOCK_SZ as u32 - 1) / BLOCK_SZ as u32
+        size.div_ceil(BLOCK_SZ as u32)
     }
     /// Return number of blocks needed include indirect1/2.
     pub fn total_blocks(size: u32) -> u32 {
         let data_blocks = Self::_data_blocks(size) as usize;
-        let mut total = data_blocks as usize;
+        let mut total = data_blocks;
         // indirect1
         if data_blocks > INODE_DIRECT_COUNT {
             total += 1;
@@ -127,8 +127,7 @@ impl DiskInode {
         if data_blocks > INDIRECT1_BOUND {
             total += 1;
             // sub indirect1
-            total +=
-                (data_blocks - INDIRECT1_BOUND + INODE_INDIRECT1_COUNT - 1) / INODE_INDIRECT1_COUNT;
+            total += (data_blocks - INDIRECT1_BOUND).div_ceil(INODE_INDIRECT1_COUNT);
         }
         total as u32
     }
