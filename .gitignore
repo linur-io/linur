@@ -22,6 +22,9 @@ pushall.sh
 # Local scratch space for throwaway experiments; never tracked.
 /ig_/
 
+# Machine-gate artifacts (serial log + report).
+/verify/
+
 # Local coding-agent docs and config
 /CLAUDE.md
 /GEMINI.md
