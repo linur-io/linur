@@ -17,7 +17,9 @@
 #            bootloader/rustsbi-qemu.bin (M5.5), and lazy_static, whose removal step
 #            is an open D7 gap awaiting an owner decision.
 #
-# Enforcement lands in M1.4, where `just verify` runs `cargo deny check`. There is no
+# Enforcement lands in M1.4's CI, which runs `cargo deny check` after `make lint` and
+# before `make verify`; the local `make lint` covers fmt and clippy only, so
+# cargo-deny stays a CI prerequisite (it needs the advisory database). There is no
 # Cargo workspace yet (the split is M5.2), so the check runs once per manifest: os,
 # user, easy-fs. easy-fs-fuse is host-only tooling outside the D7 claim and is
 # deliberately not a target — its clap/rand closure is not ledgered here.

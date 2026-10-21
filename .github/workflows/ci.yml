@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  riscv64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install the Rust toolchain
+        run: |
+          rustup show
+          rustup component add rust-src llvm-tools rustfmt clippy
+          rustup target add riscv64gc-unknown-none-elf
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-riscv64
+
+      - name: Cache cargo and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            ~/.cargo/advisory-dbs
+            os/target
+            user/target
+            easy-fs/target
+            easy-fs-fuse/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # D7 enforcement: deny.toml is applied per manifest until the workspace
+      # split (M5.2). cargo-deny is a CI prerequisite, not part of make lint.
+      - name: Dependency policy
+        run: |
+          if ! command -v cargo-deny >/dev/null; then
+            cargo install cargo-deny --locked --version 0.20.2
+          fi
+          for d in os user easy-fs; do (cd "$d" && cargo deny check); done
+
+      - name: Lint
+        run: make lint
+
+      - name: Machine gate
+        run: make verify
+
+      # The gate must fail on a known-bad boot; the target exits 0 when it did.
+      - name: Negative gate
+        run: make verify-negative
+
+      - name: Upload the gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-report
+          path: verify/

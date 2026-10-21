@@ -1,4 +1,6 @@
 [toolchain]
+# Known good: rustc 1.96.0. Pinning the channel is not portable to hosts whose
+# RUSTUP_HOME is read-only, where rustup cannot install a second toolchain.
 profile = "minimal"
 channel = "stable"
 components = ["rust-src", "llvm-tools", "rustfmt", "clippy"]
