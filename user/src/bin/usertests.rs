@@ -119,10 +119,20 @@ fn run_tests(tests: &[(&str, &str, &str, &str, i32)]) -> i32 {
             let mut exit_code: i32 = Default::default();
             let wait_pid = waitpid(pid as usize, &mut exit_code);
             assert_eq!(pid, wait_pid);
-            if exit_code == test.4 {
+            let passed = exit_code == test.4;
+            if passed {
                 // summary apps with  exit_code
                 pass_num = pass_num + 1;
             }
+            // One machine-readable line per test; verify.sh parses these. The
+            // leading newline ends any partial output the test left behind.
+            print!(
+                "\nRESULT {} expected={} actual={} {}\n",
+                test.0.trim_end_matches('\0'),
+                test.4,
+                exit_code,
+                if passed { "PASS" } else { "FAIL" }
+            );
             println!(
                 "\x1b[32mUsertests: Test {} in Process {} exited with code {}\x1b[0m",
                 test.0, pid, exit_code
