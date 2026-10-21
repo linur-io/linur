@@ -8,3 +8,19 @@ pub const MMIO: &[(usize, usize)] = &[
 ];
 
 pub type BlockDeviceImpl = crate::drivers::block::VirtIOBlock;
+
+/// QEMU virt's SiFive test finisher, already mapped through `MMIO`.
+const TEST_DEVICE: usize = 0x0010_0000;
+
+/// Stop QEMU with `code`: 0 signals a pass, anything else a failure.
+pub fn exit(code: i32) -> ! {
+    let status = if code == 0 {
+        0x5555u32
+    } else {
+        ((code as u32) << 16) | 0x3333
+    };
+    unsafe { (TEST_DEVICE as *mut u32).write_volatile(status) };
+    loop {
+        unsafe { core::arch::asm!("wfi", options(nomem, nostack)) };
+    }
+}

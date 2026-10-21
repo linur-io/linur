@@ -10,8 +10,8 @@ mod switch;
 mod task;
 
 use self::id::TaskUserRes;
+use crate::board;
 use crate::fs::{OpenFlags, open_file};
-use crate::sbi::shutdown;
 use crate::timer::remove_timer;
 use alloc::{sync::Arc, vec::Vec};
 use lazy_static::*;
@@ -78,13 +78,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
                 "[kernel] Idle process exit with exit_code {} ...",
                 exit_code
             );
-            if exit_code != 0 {
-                //crate::sbi::shutdown(255); //255 == -1 for err hint
-                shutdown(true);
-            } else {
-                //crate::sbi::shutdown(0); //0 for success hint
-                shutdown(false);
-            }
+            board::exit(if exit_code != 0 { 1 } else { 0 });
         }
         remove_from_pid2process(pid);
         let mut process_inner = process.inner_exclusive_access();
@@ -114,7 +108,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
             // Mention that we do not need to consider Mutex/Semaphore since they
             // are limited in a single process. Therefore, the blocked tasks are
             // removed when the PCB is deallocated.
-            remove_inactive_task(Arc::clone(&task));
+            remove_inactive_task(Arc::clone(task));
             let mut task_inner = task.inner_exclusive_access();
             if let Some(res) = task_inner.res.take() {
                 recycle_res.push(res);

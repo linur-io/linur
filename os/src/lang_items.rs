@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::sbi::shutdown;
+use crate::board;
 use core::arch::asm;
 use core::panic::PanicInfo;
 
@@ -26,7 +26,7 @@ fn panic(info: &PanicInfo) -> ! {
         None => error!("[kernel] panic: {}", info.message()),
     }
     backtrace();
-    shutdown(true)
+    board::exit(255)
 }
 
 /// Walk the frame-pointer chain and print each return address, outermost call last.
@@ -42,7 +42,7 @@ fn backtrace() {
     }
     println!("---START BACKTRACE---");
     for depth in 0..16 {
-        if fp == 0 || fp % 16 != 0 {
+        if fp == 0 || !fp.is_multiple_of(16) {
             break;
         }
         let (ra, next) = unsafe { (*((fp - 8) as *const usize), *((fp - 16) as *const usize)) };
