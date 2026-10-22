@@ -65,6 +65,9 @@ allow = [
     "os",
     "user_lib",
     "easy-fs",
+    # M1.5: the HAL seam and the x86_64 smoke path, both ours.
+    "hal",
+    "x86-smoke",
     # Tier 1 — permanently allowed.
     "bitflags",
     "critical-section",

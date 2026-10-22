@@ -15,6 +15,7 @@ user/target/*
 user/.idea/*
 easy-fs/target/*
 easy-fs-fuse/target/*
+x86-smoke/build/
 tools/
 pushall.sh
 .vscode/*.log

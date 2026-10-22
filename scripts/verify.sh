@@ -52,6 +52,39 @@ if [ "$build_user" = pass ] && [ "$build_kernel" = pass ] && [ "$host_tests" = p
     fi
 fi
 
+# M1.5 x86_64 smoke path (docs/x86_64-smoke.md): compile-only check, image build,
+# then boot. A pass is raw QEMU status 33 plus both serial markers. --negative
+# exercises the riscv64 bad boot only, so the x86 phases report skipped there.
+x86_check=skipped
+x86_build=skipped
+x86_boot_exit=skipped
+x86_serial=skipped
+if [ "$mode" = suite ]; then
+    x86_check=fail
+    x86_build=fail
+    x86_boot_exit=missing
+    x86_serial=fail
+    if (cd x86-smoke && cargo check --target x86_64-unknown-none) >"$dir/x86-check.log" 2>&1; then
+        x86_check=pass
+    fi
+    if make -C x86-smoke image >"$dir/x86-build.log" 2>&1; then
+        x86_build=pass
+    fi
+    # Booting a stale or missing image would be a misleading pass, so the boot
+    # phase only runs after both build phases succeeded.
+    if [ "$x86_check" = pass ] && [ "$x86_build" = pass ]; then
+        make -C x86-smoke test SERIAL_LOG="$root/$dir/x86-serial.log" >"$dir/x86-boot.log" 2>&1
+        if [ -f "$dir/x86-serial.log.status" ]; then
+            x86_boot_exit=$(cat "$dir/x86-serial.log.status")
+        fi
+        if [ -f "$dir/x86-serial.log" ] && [ "$x86_boot_exit" = 33 ] &&
+            grep -aqF '[x86_64] long mode' "$dir/x86-serial.log" &&
+            grep -aqF '[x86_64] serial ok' "$dir/x86-serial.log"; then
+            x86_serial=pass
+        fi
+    fi
+fi
+
 log="$dir/serial.log"
 reported=0
 failed=0
@@ -79,6 +112,27 @@ elif ! grep -aq 'Usertests passed!' "$log"; then
     reason="suite did not report Usertests passed"
 else
     verdict=pass
+fi
+
+# Any failed x86 phase fails the suite mode verdict; the riscv64 reason wins when
+# both halves fail, so the first failure stays the reported one.
+if [ "$mode" = suite ]; then
+    x86_reason=""
+    if [ "$x86_check" != pass ]; then
+        x86_reason="x86_64 compile-only check failed"
+    elif [ "$x86_build" != pass ]; then
+        x86_reason="x86_64 image build failed"
+    elif [ "$x86_boot_exit" != 33 ]; then
+        x86_reason="x86_64 boot exited $x86_boot_exit"
+    elif [ "$x86_serial" != pass ]; then
+        x86_reason="x86_64 serial markers missing"
+    fi
+    if [ -n "$x86_reason" ]; then
+        verdict=fail
+        if [ -z "$reason" ]; then
+            reason="$x86_reason"
+        fi
+    fi
 fi
 
 if [ "$mode" = negative ]; then
@@ -122,6 +176,15 @@ cat >"$dir/report.json" <<EOF
     "expected": "$([ "$mode" = negative ] && echo nonzero || echo 0)",
     "timed_out": $timed_out
   },
+  "x86_64": {
+    "check": "$x86_check",
+    "build": "$x86_build",
+    "boot": {
+      "exit_code": "$x86_boot_exit",
+      "expected": "33",
+      "serial": "$x86_serial"
+    }
+  },
   "tests": {
     "expected": $expected_tests,
     "reported": $reported,
@@ -141,6 +204,7 @@ EOF
     echo "commit $commit (dirty=$dirty)"
     echo "build: user $build_user, kernel $build_kernel, host tests $host_tests"
     echo "boot: exit $boot_exit, timeout $timed_out"
+    echo "x86_64: check $x86_check, image $x86_build, boot exit $x86_boot_exit, serial $x86_serial (expected 33)"
     echo "tests: $passed/$reported passed, $failed failed (expected $expected_tests)"
     if [ -n "$reason" ]; then
         echo "reason: $reason"
