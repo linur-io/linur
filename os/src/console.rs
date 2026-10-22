@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::sbi::console_putchar;
 use core::fmt::{self, Write};
+use hal::Console;
 
 struct Stdout;
 
+impl Console for Stdout {
+    fn put_byte(&self, byte: u8) {
+        console_putchar(byte as usize);
+    }
+}
+
 impl Write for Stdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.chars() {
-            console_putchar(c as usize);
+        for byte in s.bytes() {
+            self.put_byte(byte);
         }
         Ok(())
     }
@@ -19,7 +26,7 @@ pub fn print(args: fmt::Arguments) {
 
 /// Write one byte, without assuming UTF-8: a program may name any byte.
 pub fn put_byte(byte: u8) {
-    console_putchar(byte as usize);
+    Stdout.put_byte(byte);
 }
 
 #[macro_export]

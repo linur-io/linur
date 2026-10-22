@@ -38,6 +38,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
 
 [[package]]
+name = "hal"
+version = "0.1.0"
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -59,6 +63,7 @@ dependencies = [
  "bitflags",
  "buddy_system_allocator",
  "easy-fs",
+ "hal",
  "lazy_static",
  "riscv",
  "sbi-rt",
