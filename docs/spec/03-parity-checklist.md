@@ -21,11 +21,11 @@ Every row must end as exactly one of:
 | item | Linux 0.11 | linur target | status |
 |---|---|---|---|
 | boot sector stage | `bootsect.s`, exactly 512 B, loads 4 sectors | own x86_64 loader, no 512-byte constraint | TODO M5.4 |
-| machine setup | `setup.s` real mode: video params, memory size, moves image, GDT/IDT, CR0.PE | long-mode entry, memory detection, GDT/IDT/TSS | TODO M5.4 (long-mode entry partially covered by the M1.5 smoke bring-up) |
+| machine setup | `setup.s` real mode: video params, memory size, moves image, GDT/IDT, CR0.PE | long-mode entry, memory detection, GDT/IDT/TSS | TODO M5.4 (the M1.5 smoke path already enters long mode from its own loader and writes serial; memory detection, IDT/TSS and the rest are M5.4 — `docs/x86_64-smoke.md`, `verify/x86-serial.log`) |
 | memory ceiling | 16 MiB physical cap | no artificial cap | DELTA F4 |
 | task ceiling | `NR_TASKS` 64 | no artificial cap | DELTA F4 |
-| second architecture | none (i386 only) | x86_64 flagship + riscv64 port, both CI-green | TODO M5.4 |
-| boot path ownership | self-contained assembly, self-hosting | no vendored third-party binary in the boot path | TODO M5.5 |
+| second architecture | none (i386 only) | x86_64 flagship + riscv64 port, both CI-green | TODO M5.4 (from M1.5 CI runs the x86_64 smoke path — own loader → long mode → serial → clean exit — plus the compile-only `cargo check --target x86_64-unknown-none`; the full suite on both architectures is M5.4 — `verify/report.json`) |
+| boot path ownership | self-contained assembly, self-hosting | no vendored third-party binary in the boot path | TODO M5.5 (the x86_64 chain has been ours since M1.5; riscv64 still boots under the vendored RustSBI) |
 
 ## 2. Memory
 
@@ -193,7 +193,7 @@ Calls linur has that 0.11 does not: the thread and synchronisation set (1000–1
 |---|---|---|---|
 | configuration | Makefile plus `config.h` | `config/<board>.toml` → generated consts | DELTA F8, TODO M5.1 |
 | test suite | none in tree | `make verify` + host tests + userland suite | DONE |
-| CI | none | every milestone gate, both architectures | WIP M1.4 → DONE M5.4 (riscv64 until the x86_64 port lands) |
+| CI | none | every milestone gate, both architectures | WIP M1.4 → DONE M5.4 (per-architecture capability matrix from M1.5: riscv64 full suite, x86_64 smoke path (`docs/x86_64-smoke.md`), x86_64 compile-only check — `verify/report.json`; the x86_64 full suite is M5.4) |
 | parity evidence | — | this file, updated at each gate | WIP → DONE M6.4 |
 
 ## 11. Deltas registry

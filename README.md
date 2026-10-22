@@ -22,7 +22,10 @@ to M6 (0.11 parity, v1.0).
 ## Build and run
 
 Prerequisites: the pinned Rust toolchain from
-[rust-toolchain.toml](rust-toolchain.toml) and `qemu-system-riscv64` >= 7.
+[rust-toolchain.toml](rust-toolchain.toml) with the `x86_64-unknown-none`
+target (`rustup target add x86_64-unknown-none`, for the compile-only check and
+the smoke path), `qemu-system-riscv64` >= 7, and `qemu-system-x86_64` for the
+smoke path.
 
 ```sh
 cd os && make run
@@ -42,6 +45,10 @@ cd os && make run TEST=1
 suite in QEMU and exits 0 only if every expected success and every expected failure
 holds. Packing never writes into the cargo target directory, so a run cannot corrupt
 the cache.
+
+`make verify`, from the repository root, is the machine gate: the riscv64 suite
+plus the x86_64 smoke path (`x86-smoke/`: own loader → long mode → clean exit) and
+the x86_64 compile-only check, with `verify/report.json` as the artifact.
 
 ## Debugging
 

@@ -1,10 +1,10 @@
 # Debugging linur
 
-Scope: riscv64 under QEMU 8.2.2, the only target that boots (x86_64 is
-compile-only until M5.4). Every claim below is either executed on this host at
-M1.2, with its output shown, or marked **UNVERIFIED** with the reason. At M1.2
-the kernel has a serial console through SBI, no tty (M3.1) and no display
-device (M3.4), so the serial log is the only runtime evidence.
+Scope: riscv64 under QEMU 8.2.2 — the only target that runs the kernel — and the
+x86_64 smoke path (§5); the full x86_64 port is M5.4. Every claim below is either
+executed on this host at M1.2, with its output shown, or marked **UNVERIFIED** with
+the reason. At M1.2 the kernel has a serial console through SBI, no tty (M3.1) and
+no display device (M3.4), so the serial log is the only runtime evidence.
 
 ## 1. The serial console and the crash log
 
@@ -242,7 +242,28 @@ Then, in gdb (**UNVERIFIED**):
 `bt` walks the same frame-pointer chain as the kernel backtrace, so it is only
 as good as `-Cforce-frame-pointers=yes`.
 
-## 5. Read the crash in this order
+## 5. x86_64 smoke path
+
+The x86_64 target boots the M1.5 smoke kernel only (own loader → long mode →
+serial → exit); the full port is M5.4, and `docs/x86_64-smoke.md` is the contract.
+
+```sh
+make -C x86-smoke preflight   # target and llvm-objcopy present; never downloads
+make -C x86-smoke image       # build/boot.img, 33 sectors
+make -C x86-smoke test        # image + QEMU, requires status 33
+```
+
+* `make test` writes `x86-smoke/build/serial.log` and the raw QEMU status to
+  `x86-smoke/build/serial.log.status`; `SERIAL_LOG=<path>` overrides the log
+  (the machine gate uses `verify/x86-serial.log`).
+* Pass is status `33` **and** `[x86_64] long mode` plus `[x86_64] serial ok`
+  in the log: `Exit::exit(0)` writes `0x10` to `isa-debug-exit`, and QEMU
+  turns that into `(0x10 << 1) | 1` (`docs/hal.md` §3).
+* Status `0` is a failure, not a pass: with `-no-reboot` a guest reset (a triple
+  fault, e.g. an unmapped page) stops QEMU with 0. So is `124`
+  (`TEST_TIMEOUT`, 60 s) or any other value.
+
+## 6. Read the crash in this order
 
 1. `tail -40 os/last-serial.log` — last words; the log survived the crash.
 2. The `[kernel] panic at <file>:<line>: <message>` line — the source location.
