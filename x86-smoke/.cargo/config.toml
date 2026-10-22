@@ -1,0 +1,9 @@
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+rustflags = [
+    "-C", "link-arg=-Tx86.ld",
+    "-C", "link-arg=-no-pie",
+    "-C", "panic=abort",
+]
