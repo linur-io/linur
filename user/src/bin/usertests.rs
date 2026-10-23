@@ -12,6 +12,8 @@ extern crate user_lib;
 //   initproc     the init process itself
 //   user_shell   interactive by design
 //   usertests    this runner
+//   ch5_exit0, ch5_exit1, ch5_getpid  spawned helpers of spawn0/spawn1 (M2.1)
+//   ch5_stride0-5                     spawned helpers of ch5_stride (M2.1)
 
 // item of TESTS : app_name(argv_0), argv_1, argv_2, argv_3, exit_code
 static SUCC_TESTS: &[(&str, &str, &str, &str, i32)] = &[
@@ -62,6 +64,18 @@ static SUCC_TESTS: &[(&str, &str, &str, &str, i32)] = &[
     ("usertests_simple\0", "\0", "\0", "\0", 0),
     // M1.3a: EFAULT/EINVAL/ENOSYS negative cases
     ("syscall_errors\0", "\0", "\0", "\0", 0),
+    // M2.1: the re-landed lab programs (docs/reland.md §9)
+    ("mmap0\0", "\0", "\0", "\0", 0),
+    ("mmap3\0", "\0", "\0", "\0", 0),
+    ("unmap\0", "\0", "\0", "\0", 0),
+    ("unmap2\0", "\0", "\0", "\0", 0),
+    ("brk_test\0", "\0", "\0", "\0", 0),
+    ("dup2_test\0", "\0", "\0", "\0", 0),
+    ("spawn0\0", "\0", "\0", "\0", 0),
+    ("spawn1\0", "\0", "\0", "\0", 0),
+    ("ch5_setprio\0", "\0", "\0", "\0", 0),
+    ("ch5_stride\0", "\0", "\0", "\0", 0),
+    ("trace_test\0", "\0", "\0", "\0", 0),
 ];
 
 static FAIL_TESTS: &[(&str, &str, &str, &str, i32)] = &[
@@ -73,6 +87,9 @@ static FAIL_TESTS: &[(&str, &str, &str, &str, i32)] = &[
     ("adder\0", "\0", "\0", "\0", -6),
     ("adder_simple_spin\0", "\0", "\0", "\0", -6),
     ("adder_simple_yield\0", "\0", "\0", "\0", -6),
+    // M2.1: a bad mmap protection must fault on any access, not write
+    ("mmap1\0", "\0", "\0", "\0", -11),
+    ("mmap2\0", "\0", "\0", "\0", -11),
 ];
 
 use user_lib::{exec, fork, waitpid};
