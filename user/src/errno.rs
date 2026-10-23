@@ -35,6 +35,8 @@ pub const EBADF: i32 = 9;
 pub const ECHILD: i32 = 10;
 /// Temporarily unavailable; the wait wrappers retry on this.
 pub const EAGAIN: i32 = 11;
+/// Out of memory: the request would exceed or overlap the user address space.
+pub const ENOMEM: i32 = 12;
 /// Bad address.
 pub const EFAULT: i32 = 14;
 /// Invalid argument.

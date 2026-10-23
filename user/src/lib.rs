@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #![no_std]
 
+// Syscall numbers the trace test asserts on (docs/reland.md §2).
+pub const SYSCALL_WRITE: usize = 64;
+pub const SYSCALL_EXIT: usize = 93;
+pub const SYSCALL_YIELD: usize = 124;
+pub const SYSCALL_GET_TIME: usize = 169;
+pub const SYSCALL_TRACE: usize = 1041;
+
 #[macro_export]
 macro_rules! linker_symbol_addr {
     ($symbol:path) => {
@@ -15,8 +22,8 @@ mod lang_items;
 mod syscall;
 
 pub use errno::{
-    E2BIG, EAGAIN, EBADF, ECHILD, EDEADLK, EFAULT, EINVAL, ENAMETOOLONG, ENOENT, ENOEXEC, ENOSYS,
-    ESRCH, errno,
+    E2BIG, EAGAIN, EBADF, ECHILD, EDEADLK, EFAULT, EINVAL, ENAMETOOLONG, ENOENT, ENOEXEC, ENOMEM,
+    ENOSYS, ESRCH, errno,
 };
 
 extern crate alloc;
@@ -78,6 +85,9 @@ bitflags! {
 pub fn dup(fd: usize) -> isize {
     sys_dup(fd)
 }
+pub fn dup2(oldfd: usize, newfd: usize) -> isize {
+    sys_dup2(oldfd, newfd)
+}
 pub fn open(path: &str, flags: OpenFlags) -> isize {
     sys_open(path, flags.bits)
 }
@@ -110,6 +120,22 @@ pub fn fork() -> isize {
 }
 pub fn exec(path: &str, args: &[*const u8]) -> isize {
     sys_exec(path, args)
+}
+/// Create a process from the image at `path` and return its pid.
+pub fn spawn(path: &str) -> isize {
+    sys_spawn(path)
+}
+/// Set the program break and return it; `brk(0)` only reads the current one.
+pub fn brk(addr: usize) -> isize {
+    sys_brk(addr)
+}
+/// Map `len` bytes at the fixed address `start`; `prot` is R/W/X = 1/2/4.
+pub fn mmap(start: usize, len: usize, prot: usize) -> isize {
+    sys_mmap(start, len, prot)
+}
+/// Unmap the `len` bytes at `start`.
+pub fn munmap(start: usize, len: usize) -> isize {
+    sys_munmap(start, len)
 }
 /// Reap any child, blocking by yielding while it still runs.
 pub fn wait(exit_code: &mut i32) -> isize {
@@ -157,6 +183,11 @@ pub fn kill(pid: usize, signal: i32) -> isize {
 
 pub fn sleep(sleep_ms: usize) {
     sys_sleep(sleep_ms);
+}
+
+/// Set this task's scheduler weight and return it.
+pub fn set_priority(prio: isize) -> isize {
+    sys_set_priority(prio)
 }
 
 pub fn thread_create(entry: usize, arg: usize) -> isize {
@@ -215,6 +246,22 @@ pub fn condvar_signal(condvar_id: usize) {
 }
 pub fn condvar_wait(condvar_id: usize, mutex_id: usize) {
     sys_condvar_wait(condvar_id, mutex_id);
+}
+
+/// Read the byte at `addr`, or `None` when the address is inaccessible.
+pub fn trace_read(addr: *const u8) -> Option<isize> {
+    let byte = sys_trace(0, addr as usize, 0);
+    if byte < 0 { None } else { Some(byte) }
+}
+
+/// Write `data` at `addr`; false when the address is inaccessible.
+pub fn trace_write(addr: *mut u8, data: u8) -> bool {
+    sys_trace(1, addr as usize, data as usize) == 0
+}
+
+/// Number of calls to syscall `id` made by this task, this one included.
+pub fn count_syscall(id: usize) -> isize {
+    sys_trace(2, id, 0)
 }
 
 #[macro_export]
