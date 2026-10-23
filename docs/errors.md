@@ -120,6 +120,7 @@ table is per architecture — `os/src/syscall/table.rs` holds the riscv64 table
 | −9 | `EBADF` | `read`/`write`/`close`/`dup`: bad descriptor |
 | −10 | `ECHILD` | `waitpid`: no such child |
 | −11 | `EAGAIN` | `waitpid`/`waittid`: child or thread has not exited |
+| −12 | `ENOMEM` | `brk`: request below the heap bottom or overlapping a mapping |
 | −14 | `EFAULT` | the pointer range is not accessible (see §2) |
 | −22 | `EINVAL` | bad flag bits, object id, signal, or multithreaded `fork`/`exec` |
 | −35 | `EDEADLK` | the deadlock detector refuses the request |

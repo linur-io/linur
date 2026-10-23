@@ -60,10 +60,10 @@
 ## 4. 系统调用覆盖情况
 
 * 0.11：**72** 个表项（0–71）；**13** 个是 `-ENOSYS` 桩；**59** 个已实现。
-* linur：**28** 个表项 —— 15 个用 Linux/riscv64 编号（`dup` 24、`open` 56、`close` 57、`pipe` 59、`read` 63、`write` 64、`exit` 93、`sleep` 101、`yield` 124、`kill` 129、`get_time` 169、`getpid` 172、`fork` 220、`exec` 221、`waitpid` 260），一个实验用系统调用（469），以及 12 个只用于教学的编号（1000–1032：线程、mutex、semaphore、condvar）。
-* 与 0.11 已实现集合的重叠：**13** 个名字（`read`、`write`、`open`、`close`、`dup`、`pipe`、`exit`、`fork`、`execve`、`waitpid`、`getpid`、`kill`、`time`）—— 其中**有四个在语义上分叉**（单调毫秒的 `time`、5 位的 `kill`、非阻塞的 `waitpid`、非 Linux 的 `open` 标志，其中 O_CREAT = 1<<9、O_TRUNC = 1<<10）。
-* 0.11 已实现而 linur 缺失的（≈46 个）：`setup`、`creat`、`link`、`unlink`、`chdir`、`mknod`、`chmod`、`chown`、`stat`、`lseek`、`mount`、`umount`、`setuid`/`getuid`/`geteuid`/`setreuid`、`setgid`/`getgid`/`getegid`/`setregid`、`stime`、`alarm`、`fstat`、`pause`、`utime`、`access`、`nice`、`sync`、`mkdir`、`rmdir`、`times`、`brk`、`signal`、`sigaction`、`sgetmask`/`ssetmask`、`ioctl`、`fcntl`、`setpgid`、`uname`、`umask`、`chroot`、`dup2`、`getppid`、`getpgrp`、`setsid`。
-* linur 有而 0.11 没有的：12 个线程/同步系统调用、`sleep`（毫秒）、`yield`、`enable_deadlock_detect`，外加一个计划中的文档化扩展，与线程调用同属 1000+ 段：为 `ps` 服务的进程信息调用（v1.0 没有 `/proc`，0.11 也没有 `ps` 可用的接口）。
+* linur：**35** 个表项 —— 18 个用 Linux/riscv64 编号（`dup` 24、`open` 56、`close` 57、`pipe` 59、`read` 63、`write` 64、`exit` 93、`sleep` 101、`yield` 124、`kill` 129、`get_time` 169、`getpid` 172、`brk` 214、`munmap` 215、`fork` 220、`exec` 221、`mmap` 222、`waitpid` 260），一个实验用系统调用（469），12 个只用于教学的编号（1000–1032：线程、mutex、semaphore、condvar），以及四个文档化扩展（1040–1043：`spawn`、`trace`、`set_priority`、`dup2`）。1040–1043 这一族沿用 1000+ 扩展约定；`dup2` 之所以在这里，是因为 riscv64 的 Linux 只保留了 `dup3`。
+* 与 0.11 已实现集合的重叠：**15** 个名字（`read`、`write`、`open`、`close`、`dup`、`pipe`、`exit`、`fork`、`execve`、`waitpid`、`getpid`、`kill`、`time`、`brk`、`dup2`）—— 其中**有六个在语义上分叉**（单调毫秒的 `time`、5 位的 `kill`、非阻塞的 `waitpid`、非 Linux 的 `open` 标志，其中 O_CREAT = 1<<9、O_TRUNC = 1<<10、`brk` 返回新断点而 0.11 返回 0、以及 `dup2` 拒绝超出当前表长度的 `newfd` 而 0.11 接受 `NR_OPEN` 以内的任意描述符）。
+* 0.11 已实现而 linur 缺失的（≈44 个）：`setup`、`creat`、`link`、`unlink`、`chdir`、`mknod`、`chmod`、`chown`、`stat`、`lseek`、`mount`、`umount`、`setuid`/`getuid`/`geteuid`/`setreuid`、`setgid`/`getgid`/`getegid`/`setregid`、`stime`、`alarm`、`fstat`、`pause`、`utime`、`access`、`nice`、`sync`、`mkdir`、`rmdir`、`times`、`signal`、`sigaction`、`sgetmask`/`ssetmask`、`ioctl`、`fcntl`、`setpgid`、`uname`、`umask`、`chroot`、`getppid`、`getpgrp`、`setsid`。
+* linur 有而 0.11 没有的：12 个线程/同步系统调用、`sleep`（毫秒）、`yield`、`enable_deadlock_detect`、`spawn`、`trace`、`set_priority`，外加一个计划中的文档化扩展，与线程调用同属 1000+ 段：为 `ps` 服务的进程信息调用（v1.0 没有 `/proc`，0.11 也没有 `ps` 可用的接口）。
 
 **ABI 后果：** Linux 形态的接口（D1/L4）无法用一张表同时服务两个架构 —— x86_64 和 riscv64 的 Linux 系统调用编号不同（`open` 在 x86_64 上是 2，在 riscv64 上是 56；`fork` 是 57 对 220）。分派层必须按架构区分，同时共享语义内核。（已记录为待决问题。）
 
@@ -86,7 +86,7 @@
 | F11 | 用长文件名代替 0.11 的 14 字符名 | easy-fs 源流本就存 28 字节名；14 字符是人为限制 |
 | F12 | 延续 easy-fs 源流的自有磁盘格式，而不是 MINIX v1 | L3（0.11 原版镜像）是靠后的可选阶段；easy-fs 已经存在 |
 | F13 | 墙上时钟不漂移：x86_64 用自建 CMOS RTC 驱动；riscv64 为架构范围偏离——QEMU riscv `virt` 没有 RTC 设备（已在 QEMU 8.2.2 上实测），墙上时钟 = `stime` 设定的启动纪元 + jiffies | 0.11 只读一次 RTC，之后漂移；第二移植目标不应引入依赖环境的设备模型 |
-| F14 | 调度器算法自由：公平的抢占式调度器；stride 重新落地（M2.1）即具体算法 | 要点是用户可见的公平性，而不是复刻 0.11 的计数器 + 补充方案 |
+| F14 | 调度器算法自由：公平的抢占式调度器；stride 重新落地已在 M2.1 完成，即具体算法 | 要点是用户可见的公平性，而不是复刻 0.11 的计数器 + 补充方案 |
 
 ## 6. 基线中实测到的缺陷（阶段 0 的输入）
 
@@ -120,3 +120,5 @@
 | ch5-lab1 | `c505a09` | `spawn` |
 | ch5-lab2 | `2a242b5` | stride 调度 + `setprio` |
 | ch6-lab | `c82eb2d` | `link` / `unlink` / `stat` |
+
+M2.1 已把五个提交全部重新落地：语义移植到 M1 ABI，而不是 cherry-pick（`docs/reland.md`）。

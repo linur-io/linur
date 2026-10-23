@@ -59,10 +59,10 @@ So the project is not "add the missing features". It is: **build the missing hal
 ## 4. Syscall coverage
 
 * 0.11: **72** entries (0–71); **13** are `-ENOSYS` stubs; **59** are implemented.
-* linur: **28** entries — 15 with Linux/riscv64 numbers (`dup` 24, `open` 56, `close` 57, `pipe` 59, `read` 63, `write` 64, `exit` 93, `sleep` 101, `yield` 124, `kill` 129, `get_time` 169, `getpid` 172, `fork` 220, `exec` 221, `waitpid` 260), one lab syscall (469), and 12 teaching-only numbers (1000–1032: threads, mutex, semaphore, condvar).
-* Overlap with 0.11's implemented set: **13** names (`read`, `write`, `open`, `close`, `dup`, `pipe`, `exit`, `fork`, `execve`, `waitpid`, `getpid`, `kill`, `time`) — and **four of those diverge** in semantics (monotonic-ms `time`, 5-bit `kill`, non-blocking `waitpid`, non-Linux `open` flags where O_CREAT = 1<<9 and O_TRUNC = 1<<10).
-* Missing but implemented by 0.11 (≈46): `setup`, `creat`, `link`, `unlink`, `chdir`, `mknod`, `chmod`, `chown`, `stat`, `lseek`, `mount`, `umount`, `setuid`/`getuid`/`geteuid`/`setreuid`, `setgid`/`getgid`/`getegid`/`setregid`, `stime`, `alarm`, `fstat`, `pause`, `utime`, `access`, `nice`, `sync`, `mkdir`, `rmdir`, `times`, `brk`, `signal`, `sigaction`, `sgetmask`/`ssetmask`, `ioctl`, `fcntl`, `setpgid`, `uname`, `umask`, `chroot`, `dup2`, `getppid`, `getpgrp`, `setsid`.
-* Present in linur and absent from 0.11: the 12 thread/sync syscalls, `sleep` (ms), `yield`, `enable_deadlock_detect`, plus a planned documented extension in the same 1000+ family: a process-info call for `ps` (v1.0 has no `/proc`, and 0.11 offers no interface `ps` could use).
+* linur: **35** entries — 18 with Linux/riscv64 numbers (`dup` 24, `open` 56, `close` 57, `pipe` 59, `read` 63, `write` 64, `exit` 93, `sleep` 101, `yield` 124, `kill` 129, `get_time` 169, `getpid` 172, `brk` 214, `munmap` 215, `fork` 220, `exec` 221, `mmap` 222, `waitpid` 260), one lab syscall (469), 12 teaching-only numbers (1000–1032: threads, mutex, semaphore, condvar), and four documented extensions (1040–1043: `spawn`, `trace`, `set_priority`, `dup2`). The 1040–1043 family follows the 1000+ extension convention; `dup2` is there because riscv64 Linux keeps only `dup3`.
+* Overlap with 0.11's implemented set: **15** names (`read`, `write`, `open`, `close`, `dup`, `pipe`, `exit`, `fork`, `execve`, `waitpid`, `getpid`, `kill`, `time`, `brk`, `dup2`) — and **six of those diverge** in semantics (monotonic-ms `time`, 5-bit `kill`, non-blocking `waitpid`, non-Linux `open` flags where O_CREAT = 1<<9 and O_TRUNC = 1<<10, `brk` returning the new break where 0.11 returns 0, and `dup2` refusing a `newfd` past the current table where 0.11 accepts any descriptor below `NR_OPEN`).
+* Missing but implemented by 0.11 (≈44): `setup`, `creat`, `link`, `unlink`, `chdir`, `mknod`, `chmod`, `chown`, `stat`, `lseek`, `mount`, `umount`, `setuid`/`getuid`/`geteuid`/`setreuid`, `setgid`/`getgid`/`getegid`/`setregid`, `stime`, `alarm`, `fstat`, `pause`, `utime`, `access`, `nice`, `sync`, `mkdir`, `rmdir`, `times`, `signal`, `sigaction`, `sgetmask`/`ssetmask`, `ioctl`, `fcntl`, `setpgid`, `uname`, `umask`, `chroot`, `getppid`, `getpgrp`, `setsid`.
+* Present in linur and absent from 0.11: the 12 thread/sync syscalls, `sleep` (ms), `yield`, `enable_deadlock_detect`, `spawn`, `trace`, `set_priority`, plus a planned documented extension in the same 1000+ family: a process-info call for `ps` (v1.0 has no `/proc`, and 0.11 offers no interface `ps` could use).
 
 **ABI consequence:** a Linux-shaped interface (D1/L4) cannot reuse one table for two architectures — x86_64 and riscv64 Linux number their syscalls differently (`open` is 2 on x86_64, 56 on riscv64; `fork` is 57 vs 220). The dispatch layer must be per-arch with a shared semantic core. (Recorded as an open question.)
 
@@ -85,7 +85,7 @@ These are choices, not gaps — each one must stay listed so the claim stays hon
 | F11 | long file names instead of 0.11's 14-character names | the easy-fs lineage already stores 28-byte names; 14 characters is an artificial limit |
 | F12 | own on-disk format continuing the easy-fs lineage instead of MINIX v1 | L3 (original 0.11 images) is a later optional stage; easy-fs already exists |
 | F13 | wall clock that does not drift: x86_64 gets a self-built CMOS RTC driver; riscv64 is an architecture-scoped delta — QEMU riscv `virt` has no RTC device (verified on QEMU 8.2.2), so wall clock = `stime`-set boot epoch + jiffies | 0.11 reads the RTC once and drifts; the second port must not drag in an environment-dependent device model |
-| F14 | scheduler-algorithm freedom: a fair preemptive scheduler; the stride re-landing (M2.1) is the concrete algorithm | user-visible fairness is the point, not replicating 0.11's counter + refill scheme |
+| F14 | scheduler-algorithm freedom: a fair preemptive scheduler; the stride re-landing landed in M2.1 and is the concrete algorithm | user-visible fairness is the point, not replicating 0.11's counter + refill scheme |
 
 ## 6. Measured defects in the baseline (Stage 0 input)
 
@@ -119,3 +119,5 @@ Five reverted lab implementations live only in the frozen public repo `Fux-i/rCo
 | ch5-lab1 | `c505a09` | `spawn` |
 | ch5-lab2 | `2a242b5` | stride scheduling + `setprio` |
 | ch6-lab | `c82eb2d` | `link` / `unlink` / `stat` |
+
+M2.1 re-lands all five: the semantics are ported to the M1 ABI, not cherry-picked (`docs/reland.md`).

@@ -36,8 +36,8 @@ Every row must end as exactly one of:
 | copy-on-write | `copy_page_tables` clears the write bit; `un_wp_page` | COW `fork` | TODO M4.1 |
 | demand paging | `do_no_page`, page from the executable | demand paging + page cache | TODO M4.2 |
 | shared executable pages | `share_page` / `try_to_share` | shared pages | TODO M4.3 |
-| heap growth | `sys_brk` moves an end pointer, pages fault in | `brk` with the same user-visible behaviour | TODO M4.3 (`brk` re-lands first in M2.1) |
-| `mmap` | **absent** | present (needed by the L4-shaped ABI and by modern userland) | DELTA F1 |
+| heap growth | `sys_brk` moves an end pointer, pages fault in | `brk` with the same user-visible behaviour | WIP M2.1 → DONE M4.3 (eager `brk` in M2.1; demand paging in M4.3) |
+| `mmap` | **absent** | present (needed by the L4-shaped ABI and by modern userland) | DELTA F1 (present since M2.1: anonymous, fixed address, eager; M4.3 adds fd/offset and shared pages) |
 | out-of-memory | `oom()` kills a task or panics | explicit policy with accounting | TODO M4.4 |
 
 ## 3. Process
@@ -51,7 +51,7 @@ Every row must end as exactly one of:
 | `exit` / `waitpid` | reparent to init, options WNOHANG/WUNTRACED, cutime/cstime | same semantics, blocking by default | WIP M1.3 → DONE M6.1 |
 | sessions and groups | `pgrp`, `session`, `leader`, `setsid`, controlling tty | same | TODO M3.5 |
 | accounting | utime / stime / cutime / cstime | same | TODO M3.5 |
-| scheduler | counter + priority refill, preempt only in user mode | fair preemptive scheduler; exact algorithm may differ (F14) | WIP → DONE M2.1 (stride re-landing is the final scheduler) |
+| scheduler | counter + priority refill, preempt only in user mode | fair preemptive scheduler; exact algorithm may differ (F14) | DONE (stride, DELTA F14) |
 | threads | **absent** | present via the kept rCore syscalls 1000–1032 until `clone`/`futex` land | DELTA F5 |
 
 ## 4. Signals
@@ -152,7 +152,7 @@ Every row must end as exactly one of:
 | 41 | `dup` | DONE |
 | 42 | `pipe` | DONE |
 | 43 | `times` | TODO M3.5 |
-| 45 | `brk` | TODO M2.1 |
+| 45 | `brk` | DONE (M2.1, eager) |
 | 46 | `setgid` | TODO M6.1 |
 | 47 | `getgid` | TODO M6.1 |
 | 48 | `signal` | TODO M3.2 |
@@ -164,7 +164,7 @@ Every row must end as exactly one of:
 | 59 | `uname` | TODO M6.1 |
 | 60 | `umask` | TODO M2.3 |
 | 61 | `chroot` | TODO M6.1 |
-| 63 | `dup2` | TODO M2.1 |
+| 63 | `dup2` | DONE (extension 1043) |
 | 64 | `getppid` | TODO M3.5 |
 | 65 | `getpgrp` | TODO M3.5 |
 | 66 | `setsid` | TODO M3.5 |
@@ -174,7 +174,7 @@ Every row must end as exactly one of:
 | 70 | `setreuid` | TODO M6.1 |
 | 71 | `setregid` | TODO M6.1 |
 
-Calls linur has that 0.11 does not: the thread and synchronisation set (1000–1032) and the lab calls. These are recorded in `spec/01` §4 and are deliberate extensions, not parity gaps.
+Calls linur has that 0.11 does not: the 12 thread and synchronisation calls (1000–1032), the lab call 469 and the documented extensions 1040–1043 (`spawn`, `trace`, `set_priority`, `dup2` — `dup2` only because riscv64 Linux keeps `dup3`). The 1040–1043 family follows the 1000+ convention; all are recorded in `spec/01` §4 and are deliberate extensions, not parity gaps.
 
 ## 9. Userland and toolchain
 
@@ -192,7 +192,7 @@ Calls linur has that 0.11 does not: the thread and synchronisation set (1000–1
 | item | Linux 0.11 | linur target | status |
 |---|---|---|---|
 | configuration | Makefile plus `config.h` | `config/<board>.toml` → generated consts | DELTA F8, TODO M5.1 |
-| test suite | none in tree | `make verify` + host tests + userland suite | DONE |
+| test suite | none in tree | `make verify` + host tests + userland suite | DONE (M2.1 adds the 13 lab regression tests; 64 in total) |
 | CI | none | every milestone gate, both architectures | WIP M1.4 → DONE M5.4 (per-architecture capability matrix from M1.5: riscv64 full suite, x86_64 smoke path (`docs/x86_64-smoke.md`), x86_64 compile-only check — `verify/report.json`; the x86_64 full suite is M5.4) |
 | parity evidence | — | this file, updated at each gate | WIP → DONE M6.4 |
 

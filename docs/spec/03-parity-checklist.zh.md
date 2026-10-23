@@ -37,8 +37,8 @@
 | 写时复制（COW） | `copy_page_tables` 清除写位；`un_wp_page` | COW 的 `fork` | TODO M4.1 |
 | 按需分页 | `do_no_page`，从可执行文件取页 | 按需分页 + 页缓存 | TODO M4.2 |
 | 共享的可执行页 | `share_page` / `try_to_share` | 共享页 | TODO M4.3 |
-| 堆增长 | `sys_brk` 移动一个末端指针，页由缺页调入 | `brk`，用户可见行为相同 | TODO M4.3（`brk` 于 M2.1 先行重新落地） |
-| `mmap` | **无** | 提供（L4 形态的 ABI 与现代用户态都需要它） | DELTA F1 |
+| 堆增长 | `sys_brk` 移动一个末端指针，页由缺页调入 | `brk`，用户可见行为相同 | WIP M2.1 → DONE M4.3（M2.1 为即时（eager）`brk`；M4.3 加按需分页） |
+| `mmap` | **无** | 提供（L4 形态的 ABI 与现代用户态都需要它） | DELTA F1（自 M2.1 起存在：匿名、固定地址、即时映射；M4.3 加 fd/offset 与共享页） |
 | 内存耗尽 | `oom()` 杀死一个任务或 panic | 带记账的显式策略 | TODO M4.4 |
 
 ## 3. 进程
@@ -52,7 +52,7 @@
 | `exit` / `waitpid` | 重新挂到 init 之下，选项 WNOHANG/WUNTRACED，cutime/cstime | 语义相同，默认阻塞 | WIP M1.3 → DONE M6.1 |
 | 会话与进程组 | `pgrp`、`session`、`leader`、`setsid`、控制 tty | 相同 | TODO M3.5 |
 | 记账 | utime / stime / cutime / cstime | 相同 | TODO M3.5 |
-| 调度器 | 计数器 + 优先级补充，只在用户态抢占 | 公平的抢占式调度器；具体算法可以不同（F14） | WIP → DONE M2.1（stride 重新落地即最终调度器） |
+| 调度器 | 计数器 + 优先级补充，只在用户态抢占 | 公平的抢占式调度器；具体算法可以不同（F14） | DONE（stride，DELTA F14） |
 | 线程 | **无** | 通过保留的 rCore 系统调用 1000–1032 提供，直到 `clone`/`futex` 落地 | DELTA F5 |
 
 ## 4. 信号
@@ -153,7 +153,7 @@
 | 41 | `dup` | DONE |
 | 42 | `pipe` | DONE |
 | 43 | `times` | TODO M3.5 |
-| 45 | `brk` | TODO M2.1 |
+| 45 | `brk` | DONE（M2.1，即时） |
 | 46 | `setgid` | TODO M6.1 |
 | 47 | `getgid` | TODO M6.1 |
 | 48 | `signal` | TODO M3.2 |
@@ -165,7 +165,7 @@
 | 59 | `uname` | TODO M6.1 |
 | 60 | `umask` | TODO M2.3 |
 | 61 | `chroot` | TODO M6.1 |
-| 63 | `dup2` | TODO M2.1 |
+| 63 | `dup2` | DONE（扩展 1043） |
 | 64 | `getppid` | TODO M3.5 |
 | 65 | `getpgrp` | TODO M3.5 |
 | 66 | `setsid` | TODO M3.5 |
@@ -175,7 +175,7 @@
 | 70 | `setreuid` | TODO M6.1 |
 | 71 | `setregid` | TODO M6.1 |
 
-linur 有而 0.11 没有的调用：线程与同步调用集（1000–1032）以及实验用的调用。它们记录在 `spec/01` §4 中，属于有意为之的扩展，不构成对齐缺口。
+linur 有而 0.11 没有的调用：12 个线程与同步调用（1000–1032）、实验用调用 469，以及文档化扩展 1040–1043（`spawn`、`trace`、`set_priority`、`dup2` —— `dup2` 只因 riscv64 的 Linux 保留 `dup3`）。1040–1043 这一族沿用 1000+ 约定；它们都记录在 `spec/01` §4 中，属于有意为之的扩展，不构成对齐缺口。
 
 ## 9. 用户态与工具链
 
@@ -193,7 +193,7 @@ linur 有而 0.11 没有的调用：线程与同步调用集（1000–1032）以
 | 条目 | Linux 0.11 | linur 目标 | 状态 |
 |---|---|---|---|
 | 配置 | Makefile 加 `config.h` | `config/<board>.toml` → 生成的常量 | DELTA F8, TODO M5.1 |
-| 测试套件 | 源码树里没有 | `make verify` + 宿主机测试 + 用户态套件 | DONE |
+| 测试套件 | 源码树里没有 | `make verify` + 宿主机测试 + 用户态套件 | DONE（M2.1 新增 13 项实验回归测试；共 64 项） |
 | CI | 无 | 每个里程碑门禁，两种架构 | WIP M1.4 → DONE M5.4（自 M1.5 起按架构的能力矩阵：riscv64 完整套件、x86_64 冒烟路径（`docs/x86_64-smoke.md`）、x86_64 仅编译检查 —— `verify/report.json`；x86_64 的完整套件在 M5.4） |
 | 对齐证据 | — | 本文件，在每个门禁处更新 | WIP → DONE M6.4 |
 
