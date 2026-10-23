@@ -1,36 +1,81 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{ProcessControlBlock, TaskControlBlock, TaskStatus};
 use crate::sync::UPSafeCell;
-use alloc::collections::{BTreeMap, VecDeque};
+use alloc::collections::{BTreeMap, BinaryHeap};
 use alloc::sync::Arc;
+use core::cmp::Ordering;
 use lazy_static::*;
 
-pub struct TaskManager {
-    ready_queue: VecDeque<Arc<TaskControlBlock>>,
+/// A ready task together with the scheduling key it had when it was queued.
+struct ReadyTask {
+    task: Arc<TaskControlBlock>,
+    stride: isize,
+    pid: usize,
+    tid: usize,
 }
 
-/// A simple FIFO scheduler.
+impl Ord for ReadyTask {
+    /// Smallest stride first, then smallest pid, then smallest tid, so the order
+    /// is total and does not depend on the heap's internal layout. Reversed for
+    /// the max-heap.
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .stride
+            .cmp(&self.stride)
+            .then_with(|| other.pid.cmp(&self.pid))
+            .then_with(|| other.tid.cmp(&self.tid))
+    }
+}
+
+impl PartialOrd for ReadyTask {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for ReadyTask {
+    fn eq(&self, other: &Self) -> bool {
+        self.stride == other.stride && self.pid == other.pid && self.tid == other.tid
+    }
+}
+
+impl Eq for ReadyTask {}
+
+/// The ready set of the stride scheduler.
+pub struct TaskManager {
+    ready_heap: BinaryHeap<ReadyTask>,
+}
+
 impl TaskManager {
+    /// Create an empty `TaskManager`.
     pub fn new() -> Self {
         Self {
-            ready_queue: VecDeque::new(),
+            ready_heap: BinaryHeap::new(),
         }
     }
+    /// Add a task to `TaskManager`, snapshotting its scheduling key. The pid
+    /// is read first, before the TCB lock, so the lock order stays process -> task.
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
-        self.ready_queue.push_back(task);
+        let pid = task.process.upgrade().unwrap().getpid();
+        let inner = task.inner_exclusive_access();
+        let stride = inner.stride;
+        let tid = inner.res.as_ref().map_or(0, |res| res.tid);
+        drop(inner);
+        self.ready_heap.push(ReadyTask {
+            task,
+            stride,
+            pid,
+            tid,
+        });
     }
+    /// Remove and return the ready task with the smallest stride.
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        self.ready_heap.pop().map(|ready| ready.task)
     }
+    /// Drop `task` from the ready set; a task that is not queued changes nothing.
     pub fn remove(&mut self, task: Arc<TaskControlBlock>) {
-        if let Some((id, _)) = self
-            .ready_queue
-            .iter()
-            .enumerate()
-            .find(|(_, t)| Arc::as_ptr(t) == Arc::as_ptr(&task))
-        {
-            self.ready_queue.remove(id);
-        }
+        self.ready_heap
+            .retain(|ready| !Arc::ptr_eq(&ready.task, &task));
     }
 }
 

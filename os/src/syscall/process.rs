@@ -5,7 +5,7 @@ use crate::fs::{OpenFlags, open_file};
 use crate::mm::{copy_from_user, copy_to_user, translated_str};
 use crate::task::{
     SignalFlags, current_process, current_task, current_user_token, exit_current_and_run_next,
-    pid2process, suspend_current_and_run_next,
+    pid2process, suspend_current_and_run_next, syscall_count,
 };
 use crate::timer::get_time_ms;
 use alloc::string::String;
@@ -109,6 +109,30 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     }
 }
 
+/// Create a child process from the executable at `path` in the filesystem
+/// image, with an empty argument list, and return its pid.
+pub fn sys_spawn(path: *const u8) -> isize {
+    let token = current_user_token();
+    let path = match translated_str(token, path) {
+        Ok(path) => path,
+        Err(e) => return e,
+    };
+    if path.is_empty() {
+        return ENOENT;
+    }
+    if path.len() > NAME_LENGTH_LIMIT {
+        return ENAMETOOLONG;
+    }
+    let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) else {
+        return ENOENT;
+    };
+    let all_data = app_inode.read_all();
+    let Some(child) = current_process().spawn(all_data.as_slice()) else {
+        return ENOEXEC;
+    };
+    child.getpid() as isize
+}
+
 /// Reap one child: returns its pid with the exit code written through
 /// `exit_code_ptr`, `-ECHILD` when there is no such child, or `-EAGAIN` while
 /// it still runs.
@@ -147,6 +171,27 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     assert_eq!(Arc::strong_count(&child), 1);
     found_pid as isize
     // ---- release current PCB automatically
+}
+
+/// Teaching/debug hook: request 0 reads one user byte at `id`, 1 writes the low
+/// byte of `data` there, 2 returns the calling task's count of syscall `id`.
+pub fn sys_trace(request: usize, id: usize, data: usize) -> isize {
+    let token = current_user_token();
+    match request {
+        0 => {
+            let mut byte = [0u8; 1];
+            match copy_from_user(token, &mut byte, id as *const u8) {
+                Ok(()) => byte[0] as isize,
+                Err(e) => e,
+            }
+        }
+        1 => match copy_to_user(token, id as *mut u8, &[data as u8]) {
+            Ok(()) => 0,
+            Err(e) => e,
+        },
+        2 => syscall_count(id),
+        _ => EINVAL,
+    }
 }
 
 pub fn sys_kill(pid: usize, signal: u32) -> isize {

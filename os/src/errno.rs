@@ -18,6 +18,8 @@ pub const EBADF: isize = -9;
 pub const ECHILD: isize = -10;
 /// Child or thread has not exited yet.
 pub const EAGAIN: isize = -11;
+/// Out of memory: the request would exceed or overlap the user address space.
+pub const ENOMEM: isize = -12;
 /// Bad address: the user pointer range is not mapped, not user-accessible, or
 /// not writable where the kernel writes.
 pub const EFAULT: isize = -14;

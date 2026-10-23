@@ -131,3 +131,31 @@ pub fn sys_dup(fd: usize) -> isize {
     inner.fd_table[new_fd] = Some(Arc::clone(inner.fd_table[fd].as_ref().unwrap()));
     new_fd as isize
 }
+
+/// Make `newfd` refer to the open file of `oldfd` (docs/reland.md §5).
+pub fn sys_dup2(oldfd: usize, newfd: usize) -> isize {
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    if oldfd >= inner.fd_table.len() {
+        return EBADF;
+    }
+    let Some(file) = &inner.fd_table[oldfd] else {
+        return EBADF;
+    };
+    let file = Arc::clone(file);
+    if oldfd == newfd {
+        return newfd as isize;
+    }
+    // The table grows by exactly one slot; skipping ahead would allocate an
+    // unbounded hole from a user argument.
+    if newfd > inner.fd_table.len() {
+        return EBADF;
+    }
+    if newfd == inner.fd_table.len() {
+        inner.fd_table.push(Some(file));
+    } else {
+        // replacing the slot drops the previous file, which closes it
+        inner.fd_table[newfd] = Some(file);
+    }
+    newfd as isize
+}

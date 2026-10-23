@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::id::TaskUserRes;
 use super::{KernelStack, ProcessControlBlock, TaskContext, kstack_alloc};
+use crate::config::{BIG_STRIDE, DEFAULT_PRIORITY};
 use crate::trap::TrapContext;
 use crate::{mm::PhysPageNum, sync::UPSafeCell};
+use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use core::cell::RefMut;
 
@@ -24,6 +26,26 @@ impl TaskControlBlock {
         let inner = process.inner_exclusive_access();
         inner.memory_set.token()
     }
+
+    /// Charge the stride of one scheduling round: `BIG_STRIDE / priority`, at
+    /// least 1, saturating at `isize::MAX`.
+    pub fn charge_stride(&self) {
+        let mut inner = self.inner_exclusive_access();
+        let pass = (BIG_STRIDE / inner.priority).max(1);
+        inner.stride = inner.stride.saturating_add(pass);
+    }
+
+    /// Count one dispatched syscall against this task.
+    pub fn record_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner_exclusive_access();
+        *inner.syscall_counts.entry(syscall_id).or_insert(0) += 1;
+    }
+
+    /// How many times this task has called `syscall_id`.
+    pub fn syscall_count(&self, syscall_id: usize) -> isize {
+        let inner = self.inner_exclusive_access();
+        inner.syscall_counts.get(&syscall_id).copied().unwrap_or(0)
+    }
 }
 
 pub struct TaskControlBlockInner {
@@ -32,6 +54,12 @@ pub struct TaskControlBlockInner {
     pub task_cx: TaskContext,
     pub task_status: TaskStatus,
     pub exit_code: Option<i32>,
+    /// Virtual runtime consumed by the stride scheduler.
+    pub stride: isize,
+    /// Scheduling weight; one descheduling costs `BIG_STRIDE / priority`.
+    pub priority: isize,
+    /// Syscall counts of this task, keyed by syscall id.
+    pub syscall_counts: BTreeMap<usize, isize>,
 }
 
 impl TaskControlBlockInner {
@@ -65,6 +93,9 @@ impl TaskControlBlock {
                     task_cx: TaskContext::goto_trap_return(kstack_top),
                     task_status: TaskStatus::Ready,
                     exit_code: None,
+                    stride: 0,
+                    priority: DEFAULT_PRIORITY,
+                    syscall_counts: BTreeMap::new(),
                 })
             },
         }

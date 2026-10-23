@@ -7,7 +7,9 @@
 //! are the shared semantic core; x86_64 gets its sibling table with M5.4.
 
 use super::fs::*;
+use super::mm::*;
 use super::process::*;
+use super::sched::*;
 use super::sync::*;
 use super::thread::*;
 use crate::errno::ENOSYS;
@@ -24,8 +26,11 @@ const SYSCALL_YIELD: usize = 124;
 const SYSCALL_KILL: usize = 129;
 const SYSCALL_GET_TIME: usize = 169;
 const SYSCALL_GETPID: usize = 172;
+const SYSCALL_BRK: usize = 214;
+const SYSCALL_MUNMAP: usize = 215;
 const SYSCALL_FORK: usize = 220;
 const SYSCALL_EXEC: usize = 221;
+const SYSCALL_MMAP: usize = 222;
 const SYSCALL_WAITPID: usize = 260;
 const SYSCALL_ENABLE_DEADLOCK_DETECT: usize = 469;
 const SYSCALL_THREAD_CREATE: usize = 1000;
@@ -40,9 +45,17 @@ const SYSCALL_SEMAPHORE_DOWN: usize = 1022;
 const SYSCALL_CONDVAR_CREATE: usize = 1030;
 const SYSCALL_CONDVAR_SIGNAL: usize = 1031;
 const SYSCALL_CONDVAR_WAIT: usize = 1032;
+const SYSCALL_SPAWN: usize = 1040;
+const SYSCALL_TRACE: usize = 1041;
+const SYSCALL_SET_PRIORITY: usize = 1042;
+const SYSCALL_DUP2: usize = 1043;
 
 /// Run one syscall: number from a7, up to six arguments from a0-a5.
+///
+/// Every call is counted here, before dispatch, so `trace` counts the call
+/// asking the question and unknown ids are counted too (docs/reland.md §6).
 pub fn dispatch(syscall_id: usize, args: [usize; 6]) -> isize {
+    crate::task::record_syscall(syscall_id);
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_OPEN => sys_open(args[0] as *const u8, args[1] as u32),
@@ -56,8 +69,11 @@ pub fn dispatch(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_KILL => sys_kill(args[0], args[1] as u32),
         SYSCALL_GET_TIME => sys_get_time(),
         SYSCALL_GETPID => sys_getpid(),
+        SYSCALL_BRK => sys_brk(args[0]),
+        SYSCALL_MUNMAP => sys_munmap(args[0], args[1]),
         SYSCALL_FORK => sys_fork(),
         SYSCALL_EXEC => sys_exec(args[0] as *const u8, args[1] as *const usize),
+        SYSCALL_MMAP => sys_mmap(args[0], args[1], args[2]),
         SYSCALL_WAITPID => sys_waitpid(args[0] as isize, args[1] as *mut i32),
         SYSCALL_ENABLE_DEADLOCK_DETECT => sys_enable_deadlock_detect(args[0]),
         SYSCALL_THREAD_CREATE => sys_thread_create(args[0], args[1]),
@@ -72,6 +88,10 @@ pub fn dispatch(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_CONDVAR_CREATE => sys_condvar_create(),
         SYSCALL_CONDVAR_SIGNAL => sys_condvar_signal(args[0]),
         SYSCALL_CONDVAR_WAIT => sys_condvar_wait(args[0], args[1]),
+        SYSCALL_SPAWN => sys_spawn(args[0] as *const u8),
+        SYSCALL_TRACE => sys_trace(args[0], args[1], args[2]),
+        SYSCALL_SET_PRIORITY => sys_set_priority(args[0] as isize),
+        SYSCALL_DUP2 => sys_dup2(args[0], args[1]),
         _ => ENOSYS,
     }
 }

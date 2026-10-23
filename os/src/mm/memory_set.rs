@@ -3,7 +3,9 @@ use super::{FrameTracker, frame_alloc};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use super::{StepByOne, VPNRange};
-use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
+use crate::config::{
+    MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_HEAP_BASE, USER_STACK_SIZE,
+};
 use crate::sync::UPSafeCell;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -37,6 +39,10 @@ pub fn kernel_token() -> usize {
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
+    /// Lowest virtual address the brk heap may use.
+    heap_bottom: usize,
+    /// First byte above the brk heap, stored exactly as the user set it.
+    program_brk: usize,
 }
 
 impl MemorySet {
@@ -44,6 +50,8 @@ impl MemorySet {
         Self {
             page_table: PageTable::new(),
             areas: Vec::new(),
+            heap_bottom: 0,
+            program_brk: 0,
         }
     }
     pub fn token(&self) -> usize {
@@ -233,6 +241,18 @@ impl MemorySet {
         let max_end_va: VirtAddr = max_end_vpn.into();
         let mut user_stack_base: usize = max_end_va.into();
         user_stack_base += PAGE_SIZE;
+        // The heap starts empty at a fixed address and grows through brk.
+        memory_set.heap_bottom = USER_HEAP_BASE;
+        memory_set.program_brk = USER_HEAP_BASE;
+        memory_set.push(
+            MapArea::new(
+                USER_HEAP_BASE.into(),
+                USER_HEAP_BASE.into(),
+                MapType::Framed,
+                MapPermission::R | MapPermission::W | MapPermission::U,
+            ),
+            None,
+        );
         Some((
             memory_set,
             user_stack_base,
@@ -243,18 +263,20 @@ impl MemorySet {
         let mut memory_set = Self::new_bare();
         // map trampoline
         memory_set.map_trampoline();
-        // copy data sections/trap_context/user_stack
+        memory_set.heap_bottom = user_space.heap_bottom;
+        memory_set.program_brk = user_space.program_brk;
+        // Copy only the frames an area really maps: munmap leaves holes, and a
+        // hole must stay a hole in the child instead of becoming a fresh frame.
         for area in user_space.areas.iter() {
-            let new_area = MapArea::from_another(area);
-            memory_set.push(new_area, None);
-            // copy data from another space
-            for vpn in area.vpn_range {
-                let src_ppn = user_space.translate(vpn).unwrap().ppn();
-                let dst_ppn = memory_set.translate(vpn).unwrap().ppn();
-                dst_ppn
+            let mut new_area = MapArea::from_another(area);
+            for (&vpn, src_frame) in area.data_frames.iter() {
+                new_area.map_one(&mut memory_set.page_table, vpn);
+                new_area.data_frames[&vpn]
+                    .ppn
                     .get_bytes_array()
-                    .copy_from_slice(src_ppn.get_bytes_array());
+                    .copy_from_slice(src_frame.ppn.get_bytes_array());
             }
+            memory_set.areas.push(new_area);
         }
         memory_set
     }
@@ -267,6 +289,76 @@ impl MemorySet {
     }
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.page_table.translate(vpn)
+    }
+    /// Map [start, end) as a framed area if every page there is unmapped.
+    pub fn mmap(&mut self, start: VirtAddr, end: VirtAddr, permission: MapPermission) -> bool {
+        let vpn_range = VPNRange::new(start.floor(), end.ceil());
+        for vpn in vpn_range {
+            if let Some(pte) = self.translate(vpn)
+                && pte.is_valid()
+            {
+                return false;
+            }
+        }
+        self.push(MapArea::new(start, end, MapType::Framed, permission), None);
+        true
+    }
+    /// Unmap [start, end). Every page is validated before the first unmap, so a
+    /// failure leaves the whole range mapped.
+    pub fn munmap(&mut self, start: VirtAddr, end: VirtAddr) -> bool {
+        let vpn_range = VPNRange::new(start.floor(), end.ceil());
+        for vpn in vpn_range {
+            if self.translate(vpn).is_none_or(|pte| !pte.is_valid()) {
+                return false;
+            }
+        }
+        for vpn in vpn_range {
+            let Some(area) = self.areas.iter_mut().find(|area| area.contains_mapped(vpn)) else {
+                return false;
+            };
+            area.unmap_one(&mut self.page_table, vpn);
+        }
+        // The kernel page table is active, so the user ASID may cache stale pages.
+        unsafe { asm!("sfence.vma") };
+        true
+    }
+    /// Set the program break: 0 returns the current break, otherwise grow or
+    /// shrink the heap to addr. None when addr is below the heap bottom or the
+    /// new pages would overlap another mapping; a refused call changes nothing.
+    pub fn brk(&mut self, addr: usize) -> Option<usize> {
+        if addr == 0 {
+            return Some(self.program_brk);
+        }
+        if addr < self.heap_bottom {
+            return None;
+        }
+        let old_end = VirtAddr::from(self.program_brk).ceil();
+        let new_end = VirtAddr::from(addr).ceil();
+        if new_end > old_end {
+            // Validate the whole range before mapping the first page.
+            for vpn in VPNRange::new(old_end, new_end) {
+                if let Some(pte) = self.translate(vpn)
+                    && pte.is_valid()
+                {
+                    return None;
+                }
+            }
+        }
+        let heap_start = VirtAddr::from(self.heap_bottom).floor();
+        let area = self
+            .areas
+            .iter_mut()
+            .find(|area| area.vpn_range.get_start() == heap_start)?;
+        if new_end > old_end {
+            area.map_range(&mut self.page_table, old_end, new_end);
+        } else if new_end < old_end {
+            area.unmap_range(&mut self.page_table, new_end, old_end);
+        }
+        if new_end != old_end {
+            unsafe { asm!("sfence.vma") };
+        }
+        self.program_brk = addr;
+        Some(addr)
     }
     pub fn recycle_data_pages(&mut self) {
         //*self = Self::new_bare();
@@ -331,9 +423,50 @@ impl MapArea {
             self.map_one(page_table, vpn);
         }
     }
+    /// Unmap the whole area, skipping holes left by munmap.
     pub fn unmap(&mut self, page_table: &mut PageTable) {
         for vpn in self.vpn_range {
-            self.unmap_one(page_table, vpn);
+            if self.contains_mapped(vpn) {
+                self.unmap_one(page_table, vpn);
+            }
+        }
+    }
+    /// Map [start_vpn, end_vpn) and extend the area to end_vpn; the caller
+    /// checked that every page there is free.
+    fn map_range(
+        &mut self,
+        page_table: &mut PageTable,
+        start_vpn: VirtPageNum,
+        end_vpn: VirtPageNum,
+    ) {
+        for vpn in VPNRange::new(start_vpn, end_vpn) {
+            self.map_one(page_table, vpn);
+        }
+        self.vpn_range = VPNRange::new(self.vpn_range.get_start(), end_vpn);
+    }
+    /// Free [start_vpn, end_vpn) and shrink the area to start_vpn, skipping
+    /// holes left by munmap.
+    fn unmap_range(
+        &mut self,
+        page_table: &mut PageTable,
+        start_vpn: VirtPageNum,
+        end_vpn: VirtPageNum,
+    ) {
+        for vpn in VPNRange::new(start_vpn, end_vpn) {
+            if self.contains_mapped(vpn) {
+                self.unmap_one(page_table, vpn);
+            }
+        }
+        self.vpn_range = VPNRange::new(self.vpn_range.get_start(), start_vpn);
+    }
+    /// Whether a page of the area is actually mapped: a Framed area may keep
+    /// holes after munmap.
+    fn contains_mapped(&self, vpn: VirtPageNum) -> bool {
+        match self.map_type {
+            MapType::Identical => {
+                self.vpn_range.get_start() <= vpn && vpn < self.vpn_range.get_end()
+            }
+            MapType::Framed => self.data_frames.contains_key(&vpn),
         }
     }
     /// data: start-aligned but maybe with shorter length

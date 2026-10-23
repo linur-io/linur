@@ -5,7 +5,9 @@
 //! modules below are the shared semantics.
 
 mod fs;
+mod mm;
 mod process;
+mod sched;
 mod sync;
 mod table;
 mod thread;

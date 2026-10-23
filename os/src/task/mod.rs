@@ -29,9 +29,12 @@ pub use processor::{
 pub use signal::SignalFlags;
 pub use task::{TaskControlBlock, TaskStatus};
 
+/// Deschedule the current task; it pays one stride before it can be picked
+/// again, so equally weighted runnable tasks take turns.
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
     let task = take_current_task().unwrap();
+    task.charge_stride();
 
     // ---- access current TCB exclusively
     let mut task_inner = task.inner_exclusive_access();
@@ -150,6 +153,16 @@ lazy_static! {
 
 pub fn add_initproc() {
     let _initproc = INITPROC.clone();
+}
+
+/// Count one dispatched syscall against the calling task.
+pub fn record_syscall(syscall_id: usize) {
+    current_task().unwrap().record_syscall(syscall_id);
+}
+
+/// How many times the calling task has called `syscall_id`.
+pub fn syscall_count(syscall_id: usize) -> isize {
+    current_task().unwrap().syscall_count(syscall_id)
 }
 
 pub fn check_signals_of_current() -> Option<(i32, &'static str)> {

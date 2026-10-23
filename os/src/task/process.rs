@@ -189,11 +189,16 @@ impl ProcessControlBlock {
         self.inner.exclusive_access()
     }
 
+    /// The init process image is expected to be valid.
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
+        Self::try_new(elf_data).expect("init process image is not a valid ELF")
+    }
+
+    /// Build a process from a fresh image, or `None` when the image does not
+    /// load; the caller decides whether that is fatal.
+    pub fn try_new(elf_data: &[u8]) -> Option<Arc<Self>> {
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let Some((memory_set, ustack_base, entry_point)) = MemorySet::from_elf(elf_data) else {
-            panic!("init process image is not a valid ELF");
-        };
+        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data)?;
         // allocate a pid
         let pid_handle = pid_alloc();
         let process = Arc::new(Self {
@@ -251,7 +256,18 @@ impl ProcessControlBlock {
         insert_into_pid2process(process.getpid(), Arc::clone(&process));
         // add main thread to scheduler
         add_task(task);
-        process
+        Some(process)
+    }
+
+    /// Create a child process from a fresh image and link it under `self`; the
+    /// caller keeps its own address space. `None` when the image does not load.
+    pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Option<Arc<Self>> {
+        let child = Self::try_new(elf_data)?;
+        child.inner_exclusive_access().parent = Some(Arc::downgrade(self));
+        self.inner_exclusive_access()
+            .children
+            .push(Arc::clone(&child));
+        Some(child)
     }
 
     /// Only support processes with a single thread (checked by `sys_exec`).
