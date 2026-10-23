@@ -23,6 +23,9 @@ pushall.sh
 # Local scratch space for throwaway experiments; never tracked.
 /ig_/
 
+# Development notes for the milestone write-ups; never tracked.
+/notes/
+
 # Machine-gate artifacts (serial log + report).
 /verify/
 
