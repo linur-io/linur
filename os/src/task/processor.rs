@@ -3,6 +3,7 @@ use super::__switch;
 use super::{ProcessControlBlock, TaskContext, TaskControlBlock};
 use super::{TaskStatus, fetch_task};
 use crate::sync::UPSafeCell;
+use crate::timer::check_timer;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
 use lazy_static::*;
@@ -52,7 +53,13 @@ pub fn run_tasks() {
                 __switch(idle_task_cx_ptr, next_task_cx_ptr);
             }
         } else {
-            println!("no tasks available in run_tasks");
+            // Nothing is runnable. A sleeper's timer interrupt cannot be taken
+            // here: this loop runs in S-mode with SIE clear, so the trap that
+            // would wake it never arrives. Poll the timer queue instead, or a
+            // lone sleeping task would never wake.
+            drop(processor);
+            check_timer();
+            core::hint::spin_loop();
         }
     }
 }

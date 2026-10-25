@@ -52,6 +52,25 @@ if [ "$build_user" = pass ] && [ "$build_kernel" = pass ] && [ "$host_tests" = p
     fi
 fi
 
+# A lone task blocked in sleep must be woken by the idle loop. The suite cannot
+# show this -- its parent is always runnable -- so one single-app boot guards the
+# wakeup path. A pass is QEMU status 0 plus the program's final line.
+solo_exit=skipped
+solo_marker=skipped
+if [ "$mode" = suite ]; then
+    solo_exit=missing
+    solo_marker=fail
+    if [ "$build_user" = pass ] && [ "$build_kernel" = pass ]; then
+        make -C os test TEST=sleep_simple TEST_TIMEOUT=30 SERIAL_LOG="$root/$dir/solo-serial.log" >"$dir/solo-boot.log" 2>&1
+        if [ -f "$dir/solo-serial.log.status" ]; then
+            solo_exit=$(cat "$dir/solo-serial.log.status")
+        fi
+        if [ -f "$dir/solo-serial.log" ] && grep -aqF 'r_sleep passed!' "$dir/solo-serial.log"; then
+            solo_marker=pass
+        fi
+    fi
+fi
+
 # M1.5 x86_64 smoke path (docs/x86_64-smoke.md): compile-only check, image build,
 # then boot. A pass is raw QEMU status 33 plus both serial markers. --negative
 # exercises the riscv64 bad boot only, so the x86 phases report skipped there.
@@ -133,6 +152,18 @@ if [ "$mode" = suite ]; then
             reason="$x86_reason"
         fi
     fi
+    solo_reason=""
+    if [ "$solo_exit" != 0 ]; then
+        solo_reason="lone sleeper boot exited $solo_exit"
+    elif [ "$solo_marker" != pass ]; then
+        solo_reason="lone sleeper did not report r_sleep passed"
+    fi
+    if [ -n "$solo_reason" ]; then
+        verdict=fail
+        if [ -z "$reason" ]; then
+            reason="$solo_reason"
+        fi
+    fi
 fi
 
 if [ "$mode" = negative ]; then
@@ -185,6 +216,14 @@ cat >"$dir/report.json" <<EOF
       "serial": "$x86_serial"
     }
   },
+  "solo_sleep": {
+    "app": "sleep_simple",
+    "boot": {
+      "exit_code": "$solo_exit",
+      "expected": "0",
+      "marker": "$solo_marker"
+    }
+  },
   "tests": {
     "expected": $expected_tests,
     "reported": $reported,
@@ -205,6 +244,7 @@ EOF
     echo "build: user $build_user, kernel $build_kernel, host tests $host_tests"
     echo "boot: exit $boot_exit, timeout $timed_out"
     echo "x86_64: check $x86_check, image $x86_build, boot exit $x86_boot_exit, serial $x86_serial (expected 33)"
+    echo "solo: sleep_simple exit $solo_exit, marker $solo_marker (expected 0)"
     echo "tests: $passed/$reported passed, $failed failed (expected $expected_tests)"
     if [ -n "$reason" ]; then
         echo "reason: $reason"
