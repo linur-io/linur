@@ -11,7 +11,7 @@ use user_lib::{OpenFlags, close, open, read};
 #[unsafe(no_mangle)]
 pub fn main(argc: usize, argv: &[&str]) -> i32 {
     assert!(argc == 2);
-    let fd = open(argv[1], OpenFlags::RDONLY);
+    let fd = open(argv[1], OpenFlags::RDONLY, 0);
     if fd == -1 {
         panic!("Error occured when opening file");
     }

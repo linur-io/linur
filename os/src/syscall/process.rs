@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::config::USER_STACK_SIZE;
-use crate::errno::{E2BIG, EAGAIN, ECHILD, EINVAL, ENAMETOOLONG, ENOENT, ENOEXEC, ESRCH};
-use crate::fs::{OpenFlags, open_file};
+use crate::errno::{E2BIG, EAGAIN, ECHILD, EINVAL, ENOEXEC, ESRCH};
+use crate::fs::{lookup, read_all};
 use crate::mm::{copy_from_user, copy_to_user, translated_str};
 use crate::task::{
     SignalFlags, current_process, current_task, current_user_token, exit_current_and_run_next,
@@ -12,7 +12,6 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use easy_fs::NAME_LENGTH_LIMIT;
 
 pub fn sys_exit(exit_code: i32) -> ! {
     exit_current_and_run_next(exit_code);
@@ -58,12 +57,6 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         Ok(path) => path,
         Err(e) => return e,
     };
-    if path.is_empty() {
-        return ENOENT;
-    }
-    if path.len() > NAME_LENGTH_LIMIT {
-        return ENAMETOOLONG;
-    }
     let mut args_vec: Vec<String> = Vec::new();
     // The argv array and the strings share the user stack, so the stack bounds
     // them; bounding them here also bounds the kernel memory they occupy.
@@ -90,43 +83,41 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             args = args.add(1);
         }
     }
-    if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
-        let all_data = app_inode.read_all();
-        let process = current_process();
-        // A new image replaces the one address space, so it cannot be shared
-        // with other threads.
-        if process.inner_exclusive_access().thread_count() != 1 {
-            return EINVAL;
-        }
-        let argc = args_vec.len();
-        if !process.exec(all_data.as_slice(), args_vec) {
-            return ENOEXEC;
-        }
-        // return argc because cx.x[10] will be covered with it later
-        argc as isize
-    } else {
-        ENOENT
+    // The image is resolved against the working directory, like every path.
+    let cwd = current_process().inner_exclusive_access().cwd.clone();
+    let app = match lookup(&cwd, &path) {
+        Ok(app) => app,
+        Err(e) => return e,
+    };
+    let all_data = read_all(app.inode());
+    let process = current_process();
+    // A new image replaces the one address space, so it cannot be shared
+    // with other threads.
+    if process.inner_exclusive_access().thread_count() != 1 {
+        return EINVAL;
     }
+    let argc = args_vec.len();
+    if !process.exec(all_data.as_slice(), args_vec) {
+        return ENOEXEC;
+    }
+    // return argc because cx.x[10] will be covered with it later
+    argc as isize
 }
 
-/// Create a child process from the executable at `path` in the filesystem
-/// image, with an empty argument list, and return its pid.
+/// Create a child process from the executable at `path`, resolved against the
+/// working directory, with an empty argument list, and return its pid.
 pub fn sys_spawn(path: *const u8) -> isize {
     let token = current_user_token();
     let path = match translated_str(token, path) {
         Ok(path) => path,
         Err(e) => return e,
     };
-    if path.is_empty() {
-        return ENOENT;
-    }
-    if path.len() > NAME_LENGTH_LIMIT {
-        return ENAMETOOLONG;
-    }
-    let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) else {
-        return ENOENT;
+    let cwd = current_process().inner_exclusive_access().cwd.clone();
+    let app = match lookup(&cwd, &path) {
+        Ok(app) => app,
+        Err(e) => return e,
     };
-    let all_data = app_inode.read_all();
+    let all_data = read_all(app.inode());
     let Some(child) = current_process().spawn(all_data.as_slice()) else {
         return ENOEXEC;
     };

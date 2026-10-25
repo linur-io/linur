@@ -39,11 +39,23 @@ pub const EAGAIN: i32 = 11;
 pub const ENOMEM: i32 = 12;
 /// Bad address.
 pub const EFAULT: i32 = 14;
+/// File exists.
+pub const EEXIST: i32 = 17;
+/// A path component is not a directory.
+pub const ENOTDIR: i32 = 20;
+/// Is a directory.
+pub const EISDIR: i32 = 21;
 /// Invalid argument.
 pub const EINVAL: i32 = 22;
+/// Illegal seek: the file is a pipe or a terminal.
+pub const ESPIPE: i32 = 29;
+/// Numerical result out of range, such as a too-small `getcwd` buffer.
+pub const ERANGE: i32 = 34;
 /// Operation would deadlock.
 pub const EDEADLK: i32 = 35;
 /// Name too long for one directory entry.
 pub const ENAMETOOLONG: i32 = 36;
 /// Unknown syscall.
 pub const ENOSYS: i32 = 38;
+/// Directory not empty.
+pub const ENOTEMPTY: i32 = 39;

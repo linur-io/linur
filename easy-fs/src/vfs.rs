@@ -1,12 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{
-    block_cache_sync_all, get_block_cache, BlockDevice, DirEntry, DiskInode, DiskInodeType,
-    EasyFileSystem, DIRENT_SZ, NAME_LENGTH_LIMIT,
+    block_cache_sync_all, get_block_cache, BlockDevice, DirEntry, Dirent, DiskInode, DiskInodeType,
+    EasyFileSystem, VfsError, DIRENT_SZ, NAME_LENGTH_LIMIT,
 };
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::{Mutex, MutexGuard};
+
+/// Whether `name` fits in one directory entry
+fn valid_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= NAME_LENGTH_LIMIT
+}
+
+/// Whether `name` is "." or ".."
+fn is_dot(name: &str) -> bool {
+    name == "." || name == ".."
+}
+
 /// Virtual filesystem layer over easy-fs
 pub struct Inode {
     block_id: usize,
@@ -30,49 +41,114 @@ impl Inode {
             block_device,
         }
     }
-    /// Call a function over a disk inode to read it
+    /// Call a function over the disk inode to read it
     fn read_disk_inode<V>(&self, f: impl FnOnce(&DiskInode) -> V) -> V {
         get_block_cache(self.block_id, Arc::clone(&self.block_device))
             .lock()
             .read(self.block_offset, f)
     }
-    /// Call a function over a disk inode to modify it
+    /// Call a function over the disk inode to modify it
     fn modify_disk_inode<V>(&self, f: impl FnOnce(&mut DiskInode) -> V) -> V {
         get_block_cache(self.block_id, Arc::clone(&self.block_device))
             .lock()
             .modify(self.block_offset, f)
     }
-    /// Find inode under a disk inode by name
-    fn find_inode_id(&self, name: &str, disk_inode: &DiskInode) -> Option<u32> {
-        // assert it is a directory
-        assert!(disk_inode.is_dir());
-        let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+    /// Read the disk inode stored at `pos`, a block id and an offset
+    fn read_inode_at<V>(&self, pos: (u32, usize), f: impl FnOnce(&DiskInode) -> V) -> V {
+        get_block_cache(pos.0 as usize, Arc::clone(&self.block_device))
+            .lock()
+            .read(pos.1, f)
+    }
+    /// Modify the disk inode stored at `pos`, a block id and an offset
+    fn modify_inode_at<V>(&self, pos: (u32, usize), f: impl FnOnce(&mut DiskInode) -> V) -> V {
+        get_block_cache(pos.0 as usize, Arc::clone(&self.block_device))
+            .lock()
+            .modify(pos.1, f)
+    }
+    /// Number of entries in a directory inode
+    fn entry_count(disk_inode: &DiskInode) -> usize {
+        (disk_inode.size as usize) / DIRENT_SZ
+    }
+    /// Read entry `index` of a directory inode
+    fn read_dirent(&self, disk_inode: &DiskInode, index: usize) -> DirEntry {
         let mut dirent = DirEntry::empty();
-        for i in 0..file_count {
-            assert_eq!(
-                disk_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device,),
-                DIRENT_SZ,
-            );
+        assert_eq!(
+            disk_inode.read_at(index * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device),
+            DIRENT_SZ,
+        );
+        dirent
+    }
+    /// Find the entry named `name` in a directory inode
+    fn find_entry(&self, name: &str, disk_inode: &DiskInode) -> Option<(usize, u32)> {
+        for index in 0..Self::entry_count(disk_inode) {
+            let dirent = self.read_dirent(disk_inode, index);
             if dirent.name() == name {
-                return Some(dirent.inode_number());
+                return Some((index, dirent.inode_number()));
             }
         }
         None
     }
-    /// Find inode under current inode by name
-    pub fn find(&self, name: &str) -> Option<Arc<Inode>> {
-        let fs = self.fs.lock();
-        self.read_disk_inode(|disk_inode| {
-            self.find_inode_id(name, disk_inode).map(|inode_id| {
-                let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
-                Arc::new(Self::new(
-                    block_id,
-                    block_offset,
-                    self.fs.clone(),
-                    self.block_device.clone(),
-                ))
-            })
-        })
+    /// Append an entry to a directory inode, growing it by one entry
+    fn append_entry(
+        &self,
+        disk_inode: &mut DiskInode,
+        name: &str,
+        inode_id: u32,
+        fs: &mut MutexGuard<EasyFileSystem>,
+    ) {
+        let index = Self::entry_count(disk_inode);
+        self.increase_size(((index + 1) * DIRENT_SZ) as u32, disk_inode, fs);
+        let dirent = DirEntry::new(name, inode_id);
+        disk_inode.write_at(index * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+    }
+    /// Remove entry `index`, moving the last entry into its place
+    fn remove_entry(&self, disk_inode: &mut DiskInode, index: usize) {
+        let last = Self::entry_count(disk_inode) - 1;
+        if index != last {
+            let dirent = self.read_dirent(disk_inode, last);
+            disk_inode.write_at(index * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+        }
+        disk_inode.size = (last * DIRENT_SZ) as u32;
+    }
+    /// Rewrite the ".." entry of the directory inode at `pos` to name `parent_id`
+    fn set_parent(&self, pos: (u32, usize), parent_id: u32) {
+        self.modify_inode_at(pos, |disk_inode| {
+            if let Some((index, _)) = self.find_entry("..", disk_inode) {
+                let dirent = DirEntry::new("..", parent_id);
+                disk_inode.write_at(index * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+            }
+        });
+    }
+    /// Whether directory `dir_id` is `ancestor_id` or lies below it
+    fn is_in_subtree(&self, fs: &EasyFileSystem, dir_id: u32, ancestor_id: u32) -> bool {
+        let mut id = dir_id;
+        loop {
+            if id == ancestor_id {
+                return true;
+            }
+            let parent = self.read_inode_at(fs.get_disk_inode_pos(id), |disk_inode| {
+                self.find_entry("..", disk_inode)
+                    .map(|(index, _)| self.read_dirent(disk_inode, index).inode_number())
+            });
+            match parent {
+                // the root's ".." names the root itself, which ends the walk
+                Some(parent_id) if parent_id != id => id = parent_id,
+                _ => return false,
+            }
+        }
+    }
+    /// Free the data blocks of the inode `inode_id` and the inode itself
+    fn free_inode(&self, fs: &mut MutexGuard<EasyFileSystem>, inode_id: u32) {
+        let pos = fs.get_disk_inode_pos(inode_id);
+        self.modify_inode_at(pos, |disk_inode| {
+            let size = disk_inode.size;
+            let blocks = disk_inode.clear_size(&self.block_device);
+            assert_eq!(blocks.len(), DiskInode::total_blocks(size) as usize);
+            for block in blocks {
+                fs.dealloc_data(block);
+            }
+        });
+        fs.dealloc_inode(inode_id);
     }
     /// Increase the size of a disk inode
     fn increase_size(
@@ -91,82 +167,37 @@ impl Inode {
         }
         disk_inode.increase_size(new_size, v, &self.block_device);
     }
-    /// Create inode under current inode by name
-    pub fn create(&self, name: &str) -> Option<Arc<Inode>> {
-        // A name must fit one directory entry, or be rejected here: a longer
-        // one used to overflow the entry and panic the kernel.
-        if name.is_empty() || name.len() > NAME_LENGTH_LIMIT {
-            return None;
-        }
-        let mut fs = self.fs.lock();
-        let op = |root_inode: &DiskInode| {
-            // assert it is a directory
-            assert!(root_inode.is_dir());
-            // has the file been created?
-            self.find_inode_id(name, root_inode)
-        };
-        if self.read_disk_inode(op).is_some() {
-            return None;
-        }
-        // create a new file
-        // alloc a inode with an indirect block
-        let new_inode_id = fs.alloc_inode();
-        // initialize inode
-        let (new_inode_block_id, new_inode_block_offset) = fs.get_disk_inode_pos(new_inode_id);
-        get_block_cache(new_inode_block_id as usize, Arc::clone(&self.block_device))
-            .lock()
-            .modify(new_inode_block_offset, |new_inode: &mut DiskInode| {
-                new_inode.initialize(DiskInodeType::File);
-            });
-        self.modify_disk_inode(|root_inode| {
-            // append file in the dirent
-            let file_count = (root_inode.size as usize) / DIRENT_SZ;
-            let new_size = (file_count + 1) * DIRENT_SZ;
-            // increase size
-            self.increase_size(new_size as u32, root_inode, &mut fs);
-            // write dirent
-            let dirent = DirEntry::new(name, new_inode_id);
-            root_inode.write_at(
-                file_count * DIRENT_SZ,
-                dirent.as_bytes(),
-                &self.block_device,
-            );
-        });
-
-        let (block_id, block_offset) = fs.get_disk_inode_pos(new_inode_id);
-        block_cache_sync_all();
-        // return inode
-        Some(Arc::new(Self::new(
-            block_id,
-            block_offset,
-            self.fs.clone(),
-            self.block_device.clone(),
-        )))
-        // release efs lock automatically by compiler
+    /// Get inode id of current inode
+    pub fn inode_id(&self) -> u32 {
+        let fs = self.fs.lock();
+        fs.get_inode_id(self.block_id as u32, self.block_offset)
     }
-    /// List inodes under current inode
-    pub fn ls(&self) -> Vec<String> {
+    /// Whether current inode is a directory
+    pub fn is_dir(&self) -> bool {
         let _fs = self.fs.lock();
-        self.read_disk_inode(|disk_inode| {
-            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
-            let mut v: Vec<String> = Vec::new();
-            for i in 0..file_count {
-                let mut dirent = DirEntry::empty();
-                assert_eq!(
-                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device,),
-                    DIRENT_SZ,
-                );
-                v.push(String::from(dirent.name()));
-            }
-            v
-        })
+        self.read_disk_inode(|disk_inode| disk_inode.is_dir())
+    }
+    /// Whether current inode is a regular file
+    pub fn is_file(&self) -> bool {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| disk_inode.is_file())
+    }
+    /// Size of the current inode in bytes
+    pub fn size(&self) -> u32 {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| disk_inode.size)
+    }
+    /// Hard-link count of the current inode
+    pub fn nlink(&self) -> u32 {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| disk_inode.nlink)
     }
     /// Read data from current inode
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> usize {
         let _fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| disk_inode.read_at(offset, buf, &self.block_device))
     }
-    /// Write data to current inode
+    /// Write data to current inode, growing it eagerly
     pub fn write_at(&self, offset: usize, buf: &[u8]) -> usize {
         let mut fs = self.fs.lock();
         let size = self.modify_disk_inode(|disk_inode| {
@@ -176,181 +207,227 @@ impl Inode {
         block_cache_sync_all();
         size
     }
-    /// Clear the data in current inode
-    pub fn clear(&self) {
+    /// Free the data blocks of the current inode and set its size to zero
+    pub fn truncate(&self) {
         let mut fs = self.fs.lock();
         self.modify_disk_inode(|disk_inode| {
             let size = disk_inode.size;
-            let data_blocks_dealloc = disk_inode.clear_size(&self.block_device);
-            assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
-            for data_block in data_blocks_dealloc.into_iter() {
-                fs.dealloc_data(data_block);
+            let blocks = disk_inode.clear_size(&self.block_device);
+            assert_eq!(blocks.len(), DiskInode::total_blocks(size) as usize);
+            for block in blocks {
+                fs.dealloc_data(block);
             }
         });
         block_cache_sync_all();
     }
-
-    /// Get inode id of current inode
-    pub fn inode_id(&self) -> u32 {
+    /// Find the inode named `name` under the current directory
+    pub fn find(&self, name: &str) -> Option<Arc<Inode>> {
         let fs = self.fs.lock();
-        fs.get_inode_id(self.block_id as u32, self.block_offset)
-    }
-
-    /// Whether current inode is a directory
-    pub fn is_dir(&self) -> bool {
-        let _fs = self.fs.lock();
-        self.read_disk_inode(|disk_inode| disk_inode.is_dir())
-    }
-
-    /// Whether current inode is a regular file
-    pub fn is_file(&self) -> bool {
-        let _fs = self.fs.lock();
-        self.read_disk_inode(|disk_inode| disk_inode.is_file())
-    }
-
-    /// Count hard links to `inode_id` under the current directory inode
-    pub fn count_nlink(&self, inode_id: u32) -> u32 {
-        let _fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| {
-            assert!(disk_inode.is_dir());
-            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
-            let mut nlink = 0u32;
-            let mut dirent = DirEntry::empty();
-            for i in 0..file_count {
-                assert_eq!(
-                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device),
-                    DIRENT_SZ,
-                );
-                if dirent.inode_number() == inode_id {
-                    nlink += 1;
-                }
+            if !disk_inode.is_dir() {
+                return None;
             }
-            nlink
+            self.find_entry(name, disk_inode).map(|(_, inode_id)| {
+                let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
+                Arc::new(Self::new(
+                    block_id,
+                    block_offset,
+                    self.fs.clone(),
+                    self.block_device.clone(),
+                ))
+            })
         })
     }
-
-    /// Hard-link count of the current inode (scanned from root directory)
-    pub fn nlink(&self) -> u32 {
-        let inode_id = self.inode_id();
-        let root = EasyFileSystem::root_inode(&self.fs);
-        root.count_nlink(inode_id)
+    /// Create a regular file named `name` in the current directory
+    pub fn create_file(&self, name: &str) -> Result<Arc<Inode>, VfsError> {
+        self.create_inode(name, DiskInodeType::File)
     }
-
-    /// Create a hard link `new_name` pointing to the same inode as `old_name`
-    ///
-    /// Only valid when called on a directory inode (the root in this teaching FS).
-    pub fn link(&self, old_name: &str, new_name: &str) -> isize {
-        if old_name == new_name || new_name.is_empty() || new_name.len() > NAME_LENGTH_LIMIT {
-            return -1;
+    /// Create a directory named `name` in the current directory
+    pub fn create_dir(&self, name: &str) -> Result<Arc<Inode>, VfsError> {
+        self.create_inode(name, DiskInodeType::Directory)
+    }
+    /// Create an inode of type `type_` named `name` in the current directory
+    fn create_inode(&self, name: &str, type_: DiskInodeType) -> Result<Arc<Inode>, VfsError> {
+        if !valid_name(name) {
+            return Err(VfsError::InvalidName);
         }
         let mut fs = self.fs.lock();
-        let old_inode_id = self.read_disk_inode(|disk_inode| {
-            assert!(disk_inode.is_dir());
-            self.find_inode_id(old_name, disk_inode)
+        self.read_disk_inode(|disk_inode| {
+            if !disk_inode.is_dir() {
+                Err(VfsError::NotDirectory)
+            } else if self.find_entry(name, disk_inode).is_some() {
+                Err(VfsError::Exists)
+            } else {
+                Ok(())
+            }
+        })?;
+        let is_dir = type_ == DiskInodeType::Directory;
+        let parent_id = fs.get_inode_id(self.block_id as u32, self.block_offset);
+        let new_inode_id = fs.alloc_inode();
+        let new_pos = fs.get_disk_inode_pos(new_inode_id);
+        self.modify_inode_at(new_pos, |disk_inode| disk_inode.initialize(type_));
+        self.modify_disk_inode(|disk_inode| {
+            self.append_entry(disk_inode, name, new_inode_id, &mut fs);
+            if is_dir {
+                disk_inode.nlink += 1;
+            }
         });
-        let Some(old_inode_id) = old_inode_id else {
-            return -1;
-        };
-        // If new_name already exists, treat as error for safety.
-        if self
-            .read_disk_inode(|disk_inode| self.find_inode_id(new_name, disk_inode))
-            .is_some()
+        if is_dir {
+            // a new directory names itself and its parent
+            self.modify_inode_at(new_pos, |disk_inode| {
+                self.append_entry(disk_inode, ".", new_inode_id, &mut fs);
+                self.append_entry(disk_inode, "..", parent_id, &mut fs);
+            });
+        }
+        block_cache_sync_all();
+        Ok(Arc::new(Self::new(
+            new_pos.0,
+            new_pos.1,
+            self.fs.clone(),
+            self.block_device.clone(),
+        )))
+    }
+    /// Remove the entry `name` from the current directory
+    pub fn remove(&self, name: &str) -> Result<(), VfsError> {
+        if !valid_name(name) || is_dot(name) {
+            return Err(VfsError::InvalidName);
+        }
+        let mut fs = self.fs.lock();
+        let (index, inode_id) = self.read_disk_inode(|disk_inode| {
+            if !disk_inode.is_dir() {
+                return Err(VfsError::NotDirectory);
+            }
+            self.find_entry(name, disk_inode).ok_or(VfsError::NotFound)
+        })?;
+        let pos = fs.get_disk_inode_pos(inode_id);
+        let (is_dir, nlink, size) = self.read_inode_at(pos, |disk_inode| {
+            (disk_inode.is_dir(), disk_inode.nlink, disk_inode.size)
+        });
+        if is_dir && size > (2 * DIRENT_SZ) as u32 {
+            return Err(VfsError::NotEmpty);
+        }
+        self.modify_disk_inode(|disk_inode| {
+            self.remove_entry(disk_inode, index);
+            if is_dir {
+                // this entry and the child's ".." were the child's only links
+                disk_inode.nlink -= 1;
+            }
+        });
+        if is_dir || nlink == 1 {
+            self.free_inode(&mut fs, inode_id);
+        } else {
+            self.modify_inode_at(pos, |disk_inode| disk_inode.nlink -= 1);
+        }
+        block_cache_sync_all();
+        Ok(())
+    }
+    /// Link `target` into the current directory as `name`
+    pub fn link(&self, name: &str, target: &Arc<Inode>) -> Result<(), VfsError> {
+        if !valid_name(name) {
+            return Err(VfsError::InvalidName);
+        }
+        let mut fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| {
+            if !disk_inode.is_dir() {
+                Err(VfsError::NotDirectory)
+            } else if self.find_entry(name, disk_inode).is_some() {
+                Err(VfsError::Exists)
+            } else {
+                Ok(())
+            }
+        })?;
+        let target_id = fs.get_inode_id(target.block_id as u32, target.block_offset);
+        let target_pos = fs.get_disk_inode_pos(target_id);
+        if self.read_inode_at(target_pos, |disk_inode| disk_inode.is_dir()) {
+            return Err(VfsError::IsDirectory);
+        }
+        self.modify_inode_at(target_pos, |disk_inode| disk_inode.nlink += 1);
+        self.modify_disk_inode(|disk_inode| {
+            self.append_entry(disk_inode, name, target_id, &mut fs)
+        });
+        block_cache_sync_all();
+        Ok(())
+    }
+    /// Move `old` from the current directory to `new_dir`/`new`
+    pub fn rename(&self, old: &str, new_dir: &Arc<Inode>, new: &str) -> Result<(), VfsError> {
+        if !valid_name(old) || !valid_name(new) || is_dot(old) || is_dot(new) {
+            return Err(VfsError::InvalidName);
+        }
+        let mut fs = self.fs.lock();
+        let self_id = fs.get_inode_id(self.block_id as u32, self.block_offset);
+        let new_dir_id = fs.get_inode_id(new_dir.block_id as u32, new_dir.block_offset);
+        let old_id = self.read_disk_inode(|disk_inode| {
+            if !disk_inode.is_dir() {
+                return Err(VfsError::NotDirectory);
+            }
+            self.find_entry(old, disk_inode)
+                .map(|(_, inode_id)| inode_id)
+                .ok_or(VfsError::NotFound)
+        })?;
+        if !new_dir.read_disk_inode(|disk_inode| disk_inode.is_dir()) {
+            return Err(VfsError::NotDirectory);
+        }
+        let old_pos = fs.get_disk_inode_pos(old_id);
+        let old_is_dir = self.read_inode_at(old_pos, |disk_inode| disk_inode.is_dir());
+        if old_is_dir && self.is_in_subtree(&fs, new_dir_id, old_id) {
+            return Err(VfsError::InvalidName);
+        }
+        // an existing non-directory target is replaced
+        if let Some((target_index, target_id)) =
+            new_dir.read_disk_inode(|disk_inode| self.find_entry(new, disk_inode))
         {
-            return -1;
+            if target_id == old_id {
+                return Ok(());
+            }
+            let target_pos = fs.get_disk_inode_pos(target_id);
+            if self.read_inode_at(target_pos, |disk_inode| disk_inode.is_dir()) {
+                return Err(VfsError::NotEmpty);
+            }
+            let target_nlink = self.read_inode_at(target_pos, |disk_inode| disk_inode.nlink);
+            new_dir.modify_disk_inode(|disk_inode| self.remove_entry(disk_inode, target_index));
+            if target_nlink == 1 {
+                self.free_inode(&mut fs, target_id);
+            } else {
+                self.modify_inode_at(target_pos, |disk_inode| disk_inode.nlink -= 1);
+            }
         }
-        self.modify_disk_inode(|root_inode| {
-            assert!(root_inode.is_dir());
-            let file_count = (root_inode.size as usize) / DIRENT_SZ;
-            let new_size = (file_count + 1) * DIRENT_SZ;
-            self.increase_size(new_size as u32, root_inode, &mut fs);
-            let dirent = DirEntry::new(new_name, old_inode_id);
-            root_inode.write_at(
-                file_count * DIRENT_SZ,
-                dirent.as_bytes(),
-                &self.block_device,
-            );
-        });
+        // removing the target may have moved the old entry, so find it again
+        let old_index = self
+            .read_disk_inode(|disk_inode| self.find_entry(old, disk_inode).map(|(index, _)| index))
+            .ok_or(VfsError::NotFound)?;
+        self.modify_disk_inode(|disk_inode| self.remove_entry(disk_inode, old_index));
+        if old_is_dir {
+            self.set_parent(old_pos, new_dir_id);
+            if self_id != new_dir_id {
+                // the moved directory is no longer a subdirectory of this one
+                self.modify_disk_inode(|disk_inode| disk_inode.nlink -= 1);
+                new_dir.modify_disk_inode(|disk_inode| disk_inode.nlink += 1);
+            }
+        }
+        new_dir.modify_disk_inode(|disk_inode| self.append_entry(disk_inode, new, old_id, &mut fs));
         block_cache_sync_all();
-        0
+        Ok(())
     }
-
-    /// Remove directory entry `name`. Recycle inode/data when the last link is gone.
-    ///
-    /// Only valid when called on a directory inode (the root in this teaching FS).
-    pub fn unlink(&self, name: &str) -> isize {
-        let mut fs = self.fs.lock();
-        let mut removed_inode_id: Option<u32> = None;
-        self.modify_disk_inode(|root_inode| {
-            assert!(root_inode.is_dir());
-            let file_count = (root_inode.size as usize) / DIRENT_SZ;
-            if file_count == 0 {
-                return;
-            }
-            let mut dirent = DirEntry::empty();
-            let mut found_idx: Option<usize> = None;
-            for i in 0..file_count {
-                assert_eq!(
-                    root_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device),
-                    DIRENT_SZ,
-                );
-                if dirent.name() == name {
-                    found_idx = Some(i);
-                    removed_inode_id = Some(dirent.inode_number());
-                    break;
-                }
-            }
-            let Some(idx) = found_idx else {
-                return;
-            };
-            // Move the last entry into the hole, then shrink directory size.
-            if idx != file_count - 1 {
-                let mut last = DirEntry::empty();
-                assert_eq!(
-                    root_inode.read_at(
-                        (file_count - 1) * DIRENT_SZ,
-                        last.as_bytes_mut(),
-                        &self.block_device,
-                    ),
-                    DIRENT_SZ,
-                );
-                root_inode.write_at(idx * DIRENT_SZ, last.as_bytes(), &self.block_device);
-            }
-            root_inode.size = ((file_count - 1) * DIRENT_SZ) as u32;
-        });
-        let Some(inode_id) = removed_inode_id else {
-            return -1;
-        };
-        // Count remaining hard links under this directory.
-        let nlink = self.read_disk_inode(|disk_inode| {
-            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
-            let mut nlink = 0u32;
-            let mut dirent = DirEntry::empty();
-            for i in 0..file_count {
-                assert_eq!(
-                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device),
-                    DIRENT_SZ,
-                );
-                if dirent.inode_number() == inode_id {
-                    nlink += 1;
-                }
-            }
-            nlink
-        });
-        if nlink == 0 {
-            let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
-            get_block_cache(block_id as usize, Arc::clone(&self.block_device))
-                .lock()
-                .modify(block_offset, |disk_inode: &mut DiskInode| {
-                    let size = disk_inode.size;
-                    let data_blocks_dealloc = disk_inode.clear_size(&self.block_device);
-                    assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
-                    for data_block in data_blocks_dealloc.into_iter() {
-                        fs.dealloc_data(data_block);
-                    }
-                });
-            fs.dealloc_inode(inode_id);
+    /// Read the directory entry at byte `offset`
+    pub fn dirent_at(&self, offset: usize) -> Option<Dirent> {
+        if !offset.is_multiple_of(DIRENT_SZ) {
+            return None;
         }
-        block_cache_sync_all();
-        0
+        let index = offset / DIRENT_SZ;
+        let (name, inode_id) = self.read_disk_inode(|disk_inode| {
+            if !disk_inode.is_dir() || index >= Self::entry_count(disk_inode) {
+                return None;
+            }
+            let dirent = self.read_dirent(disk_inode, index);
+            Some((String::from(dirent.name()), dirent.inode_number()))
+        })?;
+        let pos = self.fs.lock().get_disk_inode_pos(inode_id);
+        let is_dir = self.read_inode_at(pos, |disk_inode| disk_inode.is_dir());
+        Some(Dirent {
+            name,
+            inode_id,
+            is_dir,
+            next_offset: offset + DIRENT_SZ,
+        })
     }
 }

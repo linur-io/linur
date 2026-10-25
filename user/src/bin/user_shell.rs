@@ -131,7 +131,7 @@ pub fn main() -> i32 {
                                 let args_addr = &process_argument.args_addr;
                                 // redirect input
                                 if !input.is_empty() {
-                                    let input_fd = open(input.as_str(), OpenFlags::RDONLY);
+                                    let input_fd = open(input.as_str(), OpenFlags::RDONLY, 0);
                                     if input_fd == -1 {
                                         println!("Error when opening file {}", input);
                                         return -4;
@@ -145,7 +145,8 @@ pub fn main() -> i32 {
                                 if !output.is_empty() {
                                     let output_fd = open(
                                         output.as_str(),
-                                        OpenFlags::CREATE | OpenFlags::WRONLY,
+                                        OpenFlags::CREATE | OpenFlags::WRONLY | OpenFlags::TRUNC,
+                                        0o666,
                                     );
                                     if output_fd == -1 {
                                         println!("Error when opening file {}", output);

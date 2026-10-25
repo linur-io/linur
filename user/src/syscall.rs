@@ -1,13 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::Stat;
 use crate::errno;
 use core::arch::asm;
 
+const SYSCALL_GETCWD: usize = 17;
 const SYSCALL_DUP: usize = 24;
+const SYSCALL_MKDIR: usize = 34;
+const SYSCALL_UNLINK: usize = 35;
+const SYSCALL_LINK: usize = 37;
+const SYSCALL_RENAME: usize = 38;
+const SYSCALL_CHDIR: usize = 49;
 const SYSCALL_OPEN: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_PIPE: usize = 59;
+const SYSCALL_GETDENTS64: usize = 61;
+const SYSCALL_LSEEK: usize = 62;
 const SYSCALL_READ: usize = 63;
 const SYSCALL_WRITE: usize = 64;
+const SYSCALL_STAT: usize = 79;
+const SYSCALL_FSTAT: usize = 80;
 const SYSCALL_EXIT: usize = 93;
 const SYSCALL_SLEEP: usize = 101;
 const SYSCALL_YIELD: usize = 124;
@@ -61,14 +72,57 @@ fn syscall(id: usize, args: [usize; 6]) -> isize {
     }
 }
 
+pub fn sys_getcwd(buf: *mut u8, size: usize) -> isize {
+    syscall(SYSCALL_GETCWD, [buf as usize, size, 0, 0, 0, 0])
+}
+
 pub fn sys_dup(fd: usize) -> isize {
     syscall(SYSCALL_DUP, [fd, 0, 0, 0, 0, 0])
 }
 
-pub fn sys_open(path: &str, flags: u32) -> isize {
+pub fn sys_mkdir(path: &str, mode: u32) -> isize {
+    syscall(
+        SYSCALL_MKDIR,
+        [path.as_ptr() as usize, mode as usize, 0, 0, 0, 0],
+    )
+}
+
+pub fn sys_unlink(path: &str, flags: u32) -> isize {
+    syscall(
+        SYSCALL_UNLINK,
+        [path.as_ptr() as usize, flags as usize, 0, 0, 0, 0],
+    )
+}
+
+pub fn sys_link(old: &str, new: &str) -> isize {
+    syscall(
+        SYSCALL_LINK,
+        [old.as_ptr() as usize, new.as_ptr() as usize, 0, 0, 0, 0],
+    )
+}
+
+pub fn sys_rename(old: &str, new: &str) -> isize {
+    syscall(
+        SYSCALL_RENAME,
+        [old.as_ptr() as usize, new.as_ptr() as usize, 0, 0, 0, 0],
+    )
+}
+
+pub fn sys_chdir(path: &str) -> isize {
+    syscall(SYSCALL_CHDIR, [path.as_ptr() as usize, 0, 0, 0, 0, 0])
+}
+
+pub fn sys_open(path: &str, flags: u32, mode: u32) -> isize {
     syscall(
         SYSCALL_OPEN,
-        [path.as_ptr() as usize, flags as usize, 0, 0, 0, 0],
+        [
+            path.as_ptr() as usize,
+            flags as usize,
+            mode as usize,
+            0,
+            0,
+            0,
+        ],
     )
 }
 
@@ -78,6 +132,17 @@ pub fn sys_close(fd: usize) -> isize {
 
 pub fn sys_pipe(pipe: &mut [usize]) -> isize {
     syscall(SYSCALL_PIPE, [pipe.as_mut_ptr() as usize, 0, 0, 0, 0, 0])
+}
+
+pub fn sys_getdents(fd: usize, buf: *mut u8, len: usize) -> isize {
+    syscall(SYSCALL_GETDENTS64, [fd, buf as usize, len, 0, 0, 0])
+}
+
+pub fn sys_lseek(fd: usize, offset: isize, whence: u32) -> isize {
+    syscall(
+        SYSCALL_LSEEK,
+        [fd, offset as usize, whence as usize, 0, 0, 0],
+    )
 }
 
 pub fn sys_read(fd: usize, buffer: &mut [u8]) -> isize {
@@ -92,6 +157,17 @@ pub fn sys_write(fd: usize, buffer: &[u8]) -> isize {
         SYSCALL_WRITE,
         [fd, buffer.as_ptr() as usize, buffer.len(), 0, 0, 0],
     )
+}
+
+pub fn sys_stat(path: &str, stat: *mut Stat) -> isize {
+    syscall(
+        SYSCALL_STAT,
+        [path.as_ptr() as usize, stat as usize, 0, 0, 0, 0],
+    )
+}
+
+pub fn sys_fstat(fd: usize, stat: *mut Stat) -> isize {
+    syscall(SYSCALL_FSTAT, [fd, stat as usize, 0, 0, 0, 0])
 }
 
 pub fn sys_exit(exit_code: i32) -> ! {

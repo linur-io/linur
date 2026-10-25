@@ -22,14 +22,15 @@ mod lang_items;
 mod syscall;
 
 pub use errno::{
-    E2BIG, EAGAIN, EBADF, ECHILD, EDEADLK, EFAULT, EINVAL, ENAMETOOLONG, ENOENT, ENOEXEC, ENOMEM,
-    ENOSYS, ESRCH, errno,
+    E2BIG, EAGAIN, EBADF, ECHILD, EDEADLK, EEXIST, EFAULT, EINVAL, EISDIR, ENAMETOOLONG, ENOENT,
+    ENOEXEC, ENOMEM, ENOSYS, ENOTDIR, ENOTEMPTY, ERANGE, ESPIPE, ESRCH, errno,
 };
 
 extern crate alloc;
 #[macro_use]
 extern crate bitflags;
 
+use alloc::string::String;
 use alloc::vec::Vec;
 use buddy_system_allocator::LockedHeap;
 use core::ptr::addr_of_mut;
@@ -75,11 +76,74 @@ pub extern "C" fn _start(argc: usize, argv: usize) -> ! {
 bitflags! {
     pub struct OpenFlags: u32 {
         const RDONLY = 0;
-        const WRONLY = 1 << 0;
-        const RDWR = 1 << 1;
-        const CREATE = 1 << 9;
-        const TRUNC = 1 << 10;
+        const WRONLY = 0x1;
+        const RDWR = 0x2;
+        const CREATE = 0x40;
+        const EXCL = 0x80;
+        const TRUNC = 0x200;
+        const APPEND = 0x400;
+        const DIRECTORY = 0x10000;
+        const CLOEXEC = 0x80000;
     }
+}
+
+/// The `lseek` starting point.
+pub const SEEK_SET: u32 = 0;
+/// The `lseek` starting point.
+pub const SEEK_CUR: u32 = 1;
+/// The `lseek` starting point.
+pub const SEEK_END: u32 = 2;
+
+/// `unlink` flag: remove a directory (the `rmdir` wrapper).
+pub const AT_REMOVEDIR: u32 = 0x200;
+
+/// `st_mode` mask for the file type.
+pub const S_IFMT: u32 = 0o170000;
+/// `st_mode`: regular file.
+pub const S_IFREG: u32 = 0o100000;
+/// `st_mode`: directory.
+pub const S_IFDIR: u32 = 0o040000;
+/// `st_mode`: character device.
+pub const S_IFCHR: u32 = 0o020000;
+/// `st_mode`: FIFO (pipe).
+pub const S_IFIFO: u32 = 0o010000;
+
+/// `d_type`: directory.
+pub const DT_DIR: u8 = 4;
+/// `d_type`: regular file.
+pub const DT_REG: u8 = 8;
+
+/// The Linux riscv64 `struct stat` (docs/vfs.md §8), field for field.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Stat {
+    pub dev: u64,
+    pub ino: u64,
+    pub mode: u32,
+    pub nlink: u32,
+    pub uid: u32,
+    pub gid: u32,
+    pub rdev: u64,
+    pub pad1: u64,
+    pub size: i64,
+    pub blksize: i32,
+    pub pad2: i32,
+    pub blocks: i64,
+    pub atime: i64,
+    pub atime_nsec: i64,
+    pub mtime: i64,
+    pub mtime_nsec: i64,
+    pub ctime: i64,
+    pub ctime_nsec: i64,
+    pub unused4: u32,
+    pub unused5: u32,
+}
+
+/// One entry parsed out of a `getdents` buffer.
+pub struct DirEntryInfo {
+    pub ino: u64,
+    pub dtype: u8,
+    pub name: String,
 }
 
 pub fn dup(fd: usize) -> isize {
@@ -88,8 +152,16 @@ pub fn dup(fd: usize) -> isize {
 pub fn dup2(oldfd: usize, newfd: usize) -> isize {
     sys_dup2(oldfd, newfd)
 }
-pub fn open(path: &str, flags: OpenFlags) -> isize {
-    sys_open(path, flags.bits)
+pub fn open(path: &str, flags: OpenFlags, mode: u32) -> isize {
+    sys_open(path, flags.bits, mode)
+}
+/// `open(path, O_CREAT|O_WRONLY|O_TRUNC, mode)`.
+pub fn creat(path: &str, mode: u32) -> isize {
+    sys_open(
+        path,
+        (OpenFlags::CREATE | OpenFlags::WRONLY | OpenFlags::TRUNC).bits,
+        mode,
+    )
 }
 pub fn close(fd: usize) -> isize {
     sys_close(fd)
@@ -102,6 +174,66 @@ pub fn read(fd: usize, buf: &mut [u8]) -> isize {
 }
 pub fn write(fd: usize, buf: &[u8]) -> isize {
     sys_write(fd, buf)
+}
+/// Read the absolute path of the working directory into `buf`.
+pub fn getcwd(buf: &mut [u8]) -> isize {
+    sys_getcwd(buf.as_mut_ptr(), buf.len())
+}
+pub fn chdir(path: &str) -> isize {
+    sys_chdir(path)
+}
+pub fn mkdir(path: &str, mode: u32) -> isize {
+    sys_mkdir(path, mode)
+}
+/// Remove a directory; `unlinkat(path, AT_REMOVEDIR)`.
+pub fn rmdir(path: &str) -> isize {
+    sys_unlink(path, AT_REMOVEDIR)
+}
+pub fn unlink(path: &str) -> isize {
+    sys_unlink(path, 0)
+}
+pub fn link(old: &str, new: &str) -> isize {
+    sys_link(old, new)
+}
+pub fn rename(old: &str, new: &str) -> isize {
+    sys_rename(old, new)
+}
+pub fn lseek(fd: usize, offset: isize, whence: u32) -> isize {
+    sys_lseek(fd, offset, whence)
+}
+pub fn stat(path: &str, stat: &mut Stat) -> isize {
+    sys_stat(path, stat)
+}
+pub fn fstat(fd: usize, stat: &mut Stat) -> isize {
+    sys_fstat(fd, stat)
+}
+pub fn getdents(fd: usize, buf: &mut [u8]) -> isize {
+    sys_getdents(fd, buf.as_mut_ptr(), buf.len())
+}
+/// Parse the entries out of a `getdents` buffer; `len` is the byte count that
+/// `getdents` returned.
+pub fn dirents(buf: &[u8], len: usize) -> Vec<DirEntryInfo> {
+    // linux_dirent64: ino u64, off i64, reclen u16, dtype u8, name and NUL.
+    const HEADER: usize = 19;
+    let mut entries = Vec::new();
+    let mut offset = 0;
+    while offset + HEADER <= len {
+        let record = &buf[offset..len];
+        let ino = u64::from_ne_bytes(record[0..8].try_into().unwrap());
+        let reclen = u16::from_ne_bytes(record[16..18].try_into().unwrap()) as usize;
+        let name = &record[HEADER..reclen];
+        let name_len = name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(name.len());
+        entries.push(DirEntryInfo {
+            ino,
+            dtype: record[18],
+            name: core::str::from_utf8(&name[..name_len]).unwrap().into(),
+        });
+        offset += reclen;
+    }
+    entries
 }
 pub fn exit(exit_code: i32) -> ! {
     sys_exit(exit_code);

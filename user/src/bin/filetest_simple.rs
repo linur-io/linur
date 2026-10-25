@@ -11,13 +11,17 @@ use user_lib::{OpenFlags, close, open, read, write};
 pub fn main() -> i32 {
     let test_str = "Hello, world!";
     let filea = "filea\0";
-    let fd = open(filea, OpenFlags::CREATE | OpenFlags::WRONLY);
+    let fd = open(
+        filea,
+        OpenFlags::CREATE | OpenFlags::WRONLY | OpenFlags::TRUNC,
+        0o666,
+    );
     assert!(fd > 0);
     let fd = fd as usize;
     write(fd, test_str.as_bytes());
     close(fd);
 
-    let fd = open(filea, OpenFlags::RDONLY);
+    let fd = open(filea, OpenFlags::RDONLY, 0);
     assert!(fd > 0);
     let fd = fd as usize;
     let mut buffer = [0u8; 100];

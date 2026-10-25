@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use clap::{App, Arg};
 use easy_fs::{BlockDevice, EasyFileSystem};
+#[cfg(test)]
+use easy_fs::{Inode, VfsError};
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -75,6 +77,7 @@ fn easy_fs_pack() -> std::io::Result<()> {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(target_path.join("fs.img"))?;
         f.set_len(16 * 2048 * 512).unwrap();
         f
@@ -95,11 +98,38 @@ fn easy_fs_pack() -> std::io::Result<()> {
         let mut all_data: Vec<u8> = Vec::new();
         File::open(entry.path())?.read_to_end(&mut all_data)?;
         // create a file in easy-fs
-        let inode = root_inode.create(name.as_str()).unwrap();
+        let inode = root_inode.create_file(name.as_str()).unwrap();
         // write data to easy-fs
         inode.write_at(0, all_data.as_slice());
     }
     Ok(())
+}
+
+/// Iterate a directory into `(name, inode_id, is_dir)` triples.
+#[cfg(test)]
+fn dirents(inode: &Inode) -> Vec<(String, u32, bool)> {
+    let mut entries = Vec::new();
+    let mut offset = 0;
+    while let Some(dirent) = inode.dirent_at(offset) {
+        offset = dirent.next_offset;
+        entries.push((dirent.name, dirent.inode_id, dirent.is_dir));
+    }
+    entries
+}
+
+/// One expected `dirents` triple.
+#[cfg(test)]
+fn entry(name: &str, inode_id: u32, is_dir: bool) -> (String, u32, bool) {
+    (name.to_string(), inode_id, is_dir)
+}
+
+/// The error of a failed operation whose success value has no `Debug`.
+#[cfg(test)]
+fn err<T>(result: Result<T, VfsError>) -> VfsError {
+    match result {
+        Ok(_) => panic!("expected an error"),
+        Err(error) => error,
+    }
 }
 
 #[test]
@@ -109,58 +139,194 @@ fn efs_test() -> std::io::Result<()> {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open("target/fs.img")?;
-        f.set_len(8192 * 512).unwrap();
+        f.set_len((4096 * BLOCK_SZ) as u64).unwrap();
         f
     })));
     EasyFileSystem::create(block_file.clone(), 4096, 1);
     let efs = EasyFileSystem::open(block_file.clone());
-    let root_inode = EasyFileSystem::root_inode(&efs);
-    root_inode.create("filea");
-    root_inode.create("fileb");
-    for name in root_inode.ls() {
-        println!("{}", name);
-    }
-    let filea = root_inode.find("filea").unwrap();
-    let greet_str = "Hello, world!";
-    filea.write_at(0, greet_str.as_bytes());
-    //let mut buffer = [0u8; 512];
-    let mut buffer = [0u8; 233];
-    let len = filea.read_at(0, &mut buffer);
-    assert_eq!(greet_str, core::str::from_utf8(&buffer[..len]).unwrap(),);
+    let root_inode = Arc::new(EasyFileSystem::root_inode(&efs));
 
-    let mut random_str_test = |len: usize| {
-        filea.clear();
-        assert_eq!(filea.read_at(0, &mut buffer), 0,);
-        let mut str = String::new();
-        use rand;
-        // random digit
+    // "." and ".." are real entries naming the root itself.
+    assert_eq!(root_inode.nlink(), 2);
+    assert_eq!(
+        dirents(&root_inode),
+        vec![entry(".", 0, true), entry("..", 0, true)]
+    );
+    assert_eq!(root_inode.find(".").unwrap().inode_id(), 0);
+    assert_eq!(root_inode.find("..").unwrap().inode_id(), 0);
+
+    // A regular file starts with one link; names are validated.
+    let greet = "Hello, world!";
+    let filea = root_inode.create_file("filea").unwrap();
+    assert!(filea.is_file());
+    assert_eq!(filea.nlink(), 1);
+    assert_eq!(err(root_inode.create_file("filea")), VfsError::Exists);
+    assert_eq!(err(root_inode.create_file("")), VfsError::InvalidName);
+    assert_eq!(
+        err(root_inode.create_file(&"x".repeat(28))),
+        VfsError::InvalidName
+    );
+    assert_eq!(err(filea.create_file("child")), VfsError::NotDirectory);
+
+    // Data round-trips and truncate frees it.
+    filea.write_at(0, greet.as_bytes());
+    assert_eq!(filea.size(), greet.len() as u32);
+    let mut buf = [0u8; 32];
+    assert_eq!(filea.read_at(0, &mut buf), greet.len());
+    assert_eq!(core::str::from_utf8(&buf[..greet.len()]).unwrap(), greet);
+    filea.truncate();
+    assert_eq!(filea.size(), 0);
+    assert_eq!(filea.read_at(0, &mut buf), 0);
+    filea.write_at(0, greet.as_bytes());
+    assert_eq!(filea.read_at(0, &mut buf), greet.len());
+    assert_eq!(filea.read_at(1024, &mut buf), 0);
+
+    // A new directory names itself and its parent and bumps the parent's nlink.
+    let d1 = root_inode.create_dir("d1").unwrap();
+    assert!(d1.is_dir());
+    assert_eq!(d1.nlink(), 2);
+    assert_eq!(root_inode.nlink(), 3);
+    assert_eq!(
+        dirents(&d1),
+        vec![entry(".", d1.inode_id(), true), entry("..", 0, true)]
+    );
+    assert_eq!(err(root_inode.create_dir("d1")), VfsError::Exists);
+
+    // Hard links share the inode and its data.
+    root_inode.link("filea2", &filea).unwrap();
+    assert_eq!(filea.nlink(), 2);
+    let filea2 = root_inode.find("filea2").unwrap();
+    assert_eq!(filea2.inode_id(), filea.inode_id());
+    assert_eq!(filea2.read_at(0, &mut buf), greet.len());
+    assert_eq!(
+        root_inode.link("filea2", &filea).unwrap_err(),
+        VfsError::Exists
+    );
+    assert_eq!(
+        root_inode.link("d1link", &d1).unwrap_err(),
+        VfsError::IsDirectory
+    );
+    root_inode.remove("filea2").unwrap();
+    assert_eq!(filea.nlink(), 1);
+    assert!(root_inode.find("filea2").is_none());
+    assert_eq!(root_inode.remove("filea2").unwrap_err(), VfsError::NotFound);
+    assert_eq!(root_inode.remove(".").unwrap_err(), VfsError::InvalidName);
+
+    // Rename within a directory, replacing an existing regular file.
+    root_inode
+        .rename("filea", &root_inode, "filea_renamed")
+        .unwrap();
+    assert!(root_inode.find("filea").is_none());
+    let filea_renamed = root_inode.find("filea_renamed").unwrap();
+    assert_eq!(filea_renamed.inode_id(), filea.inode_id());
+    root_inode.create_file("fileb").unwrap().write_at(0, b"old");
+    root_inode
+        .rename("filea_renamed", &root_inode, "fileb")
+        .unwrap();
+    let fileb = root_inode.find("fileb").unwrap();
+    assert_eq!(fileb.inode_id(), filea.inode_id());
+    assert_eq!(fileb.read_at(0, &mut buf), greet.len());
+
+    // Rename across directories: the data follows the inode.
+    let d2 = root_inode.create_dir("d2").unwrap();
+    assert_eq!(root_inode.nlink(), 4);
+    let moved = root_inode.create_file("moved").unwrap();
+    moved.write_at(0, b"data");
+    root_inode.rename("moved", &d2, "moved2").unwrap();
+    assert!(root_inode.find("moved").is_none());
+    let moved2 = d2.find("moved2").unwrap();
+    assert_eq!(moved2.inode_id(), moved.inode_id());
+    assert_eq!(moved2.read_at(0, &mut buf), 4);
+
+    // Moving a directory rewrites its ".." entry and both parents' nlink.
+    root_inode.rename("d1", &d2, "d1_moved").unwrap();
+    assert_eq!(root_inode.nlink(), 3);
+    assert_eq!(d2.nlink(), 3);
+    assert_eq!(d1.find("..").unwrap().inode_id(), d2.inode_id());
+    assert_eq!(d2.find("d1_moved").unwrap().inode_id(), d1.inode_id());
+
+    // A directory cannot be moved into its own subtree.
+    assert_eq!(
+        d2.rename("d1_moved", &d1, "inside").unwrap_err(),
+        VfsError::InvalidName
+    );
+    assert_eq!(
+        root_inode.rename("d2", &d1, "d2_in_d1").unwrap_err(),
+        VfsError::InvalidName
+    );
+
+    // rmdir refuses a non-empty directory and frees directories bottom-up.
+    assert_eq!(root_inode.remove("d2").unwrap_err(), VfsError::NotEmpty);
+    d2.remove("moved2").unwrap();
+    d2.remove("d1_moved").unwrap();
+    assert_eq!(d2.nlink(), 2);
+    root_inode.remove("d2").unwrap();
+    assert_eq!(root_inode.nlink(), 2);
+    assert!(root_inode.find("d2").is_none());
+
+    // A directory spanning several data blocks iterates and shrinks correctly.
+    let many = root_inode.create_dir("many").unwrap();
+    const MANY: usize = 40;
+    for i in 0..MANY {
+        many.create_file(&format!("f{}", i)).unwrap();
+    }
+    let entries = dirents(&many);
+    assert_eq!(entries.len(), MANY + 2);
+    assert_eq!(entries[0], entry(".", many.inode_id(), true));
+    assert_eq!(entries[1], entry("..", 0, true));
+    assert_eq!(
+        entries[2],
+        entry("f0", many.find("f0").unwrap().inode_id(), false)
+    );
+    assert_eq!(entries[MANY + 1].0, format!("f{}", MANY - 1));
+    for i in 0..MANY {
+        many.remove(&format!("f{}", i)).unwrap();
+    }
+    assert_eq!(
+        dirents(&many),
+        vec![entry(".", many.inode_id(), true), entry("..", 0, true)]
+    );
+    root_inode.remove("many").unwrap();
+    assert_eq!(root_inode.nlink(), 2);
+
+    // Big files cross the direct, indirect1 and indirect2 boundaries.
+    let big = fileb.clone();
+    let random_str_test = |len: usize| {
+        big.truncate();
+        assert_eq!(big.size(), 0);
+        let mut data = String::new();
         for _ in 0..len {
-            str.push(char::from('0' as u8 + rand::random::<u8>() % 10));
+            data.push(char::from(b'0' + rand::random::<u8>() % 10));
         }
-        filea.write_at(0, str.as_bytes());
+        big.write_at(0, data.as_bytes());
+        assert_eq!(big.size(), len as u32);
         let mut read_buffer = [0u8; 127];
         let mut offset = 0usize;
-        let mut read_str = String::new();
+        let mut read_data = String::new();
         loop {
-            let len = filea.read_at(offset, &mut read_buffer);
-            if len == 0 {
+            let n = big.read_at(offset, &mut read_buffer);
+            if n == 0 {
                 break;
             }
-            offset += len;
-            read_str.push_str(core::str::from_utf8(&read_buffer[..len]).unwrap());
+            offset += n;
+            read_data.push_str(core::str::from_utf8(&read_buffer[..n]).unwrap());
         }
-        assert_eq!(str, read_str);
+        assert_eq!(data, read_data);
     };
-
     random_str_test(4 * BLOCK_SZ);
     random_str_test(8 * BLOCK_SZ + BLOCK_SZ / 2);
+    random_str_test(26 * BLOCK_SZ);
+    random_str_test(27 * BLOCK_SZ);
+    random_str_test(27 * BLOCK_SZ + 1);
     random_str_test(100 * BLOCK_SZ);
-    random_str_test(70 * BLOCK_SZ + BLOCK_SZ / 7);
-    random_str_test((12 + 128) * BLOCK_SZ);
+    random_str_test(155 * BLOCK_SZ);
+    random_str_test(155 * BLOCK_SZ + 1);
     random_str_test(400 * BLOCK_SZ);
     random_str_test(1000 * BLOCK_SZ);
     random_str_test(2000 * BLOCK_SZ);
 
+    assert_eq!(root_inode.nlink(), 2);
     Ok(())
 }

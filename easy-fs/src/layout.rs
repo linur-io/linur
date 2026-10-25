@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{get_block_cache, BlockDevice, BLOCK_SZ};
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::{Debug, Formatter, Result};
@@ -7,7 +8,7 @@ use core::fmt::{Debug, Formatter, Result};
 /// Magic number for sanity check
 const EFS_MAGIC: u32 = 0x3b800001;
 /// The max number of direct inodes
-const INODE_DIRECT_COUNT: usize = 28;
+const INODE_DIRECT_COUNT: usize = 27;
 /// The max length of inode name
 pub const NAME_LENGTH_LIMIT: usize = 27;
 /// The max number of indirect1 inodes
@@ -69,6 +70,7 @@ impl SuperBlock {
     }
 }
 /// Type of a disk inode
+#[repr(u32)]
 #[derive(PartialEq)]
 pub enum DiskInodeType {
     File,
@@ -83,17 +85,27 @@ type DataBlock = [u8; BLOCK_SZ];
 #[repr(C)]
 pub struct DiskInode {
     pub size: u32,
+    pub nlink: u32,
     pub direct: [u32; INODE_DIRECT_COUNT],
     pub indirect1: u32,
     pub indirect2: u32,
     type_: DiskInodeType,
 }
 
+// A disk inode must stay 128 bytes so that four of them fit in one block.
+const _: () = assert!(core::mem::size_of::<DiskInode>() == 128);
+
 impl DiskInode {
     /// Initialize a disk inode, as well as all direct inodes under it
     /// indirect1 and indirect2 block are allocated only when they are needed
     pub fn initialize(&mut self, type_: DiskInodeType) {
         self.size = 0;
+        // A file starts with one link; a directory also counts its own "."
+        self.nlink = if type_ == DiskInodeType::Directory {
+            2
+        } else {
+            1
+        };
         self.direct.iter_mut().for_each(|v| *v = 0);
         self.indirect1 = 0;
         self.indirect2 = 0;
@@ -104,7 +116,6 @@ impl DiskInode {
         self.type_ == DiskInodeType::Directory
     }
     /// Whether this inode is a file
-    #[allow(unused)]
     pub fn is_file(&self) -> bool {
         self.type_ == DiskInodeType::File
     }
@@ -431,4 +442,34 @@ impl DirEntry {
     pub fn inode_number(&self) -> u32 {
         self.inode_number
     }
+}
+
+/// Why a directory or inode operation was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VfsError {
+    /// The directory holds no entry with this name.
+    NotFound,
+    /// The directory already holds an entry with this name.
+    Exists,
+    /// The directory still holds entries other than "." and "..".
+    NotEmpty,
+    /// The receiver of the operation is not a directory.
+    NotDirectory,
+    /// The target of the operation is a directory.
+    IsDirectory,
+    /// The name is empty, longer than 27 bytes, or one of "." and "..".
+    InvalidName,
+}
+
+/// One directory entry produced by iteration.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Dirent {
+    /// Name of the entry.
+    pub name: String,
+    /// Inode number the entry points to.
+    pub inode_id: u32,
+    /// Whether the named inode is a directory.
+    pub is_dir: bool,
+    /// Byte offset to pass to the next `dirent_at` call.
+    pub next_offset: usize,
 }

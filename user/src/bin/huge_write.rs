@@ -13,7 +13,11 @@ pub fn main() -> i32 {
     for (i, ch) in buffer.iter_mut().enumerate() {
         *ch = i as u8;
     }
-    let f = open("testf\0", OpenFlags::CREATE | OpenFlags::WRONLY);
+    let f = open(
+        "testf\0",
+        OpenFlags::CREATE | OpenFlags::WRONLY | OpenFlags::TRUNC,
+        0o666,
+    );
     if f < 0 {
         panic!("Open test file failed!");
     }

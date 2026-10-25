@@ -11,7 +11,7 @@ mod task;
 
 use self::id::TaskUserRes;
 use crate::board;
-use crate::fs::{OpenFlags, open_file};
+use crate::fs::{lookup, read_all, root};
 use crate::timer::remove_timer;
 use alloc::{sync::Arc, vec::Vec};
 use lazy_static::*;
@@ -145,8 +145,8 @@ pub fn exit_current_and_run_next(exit_code: i32) {
 
 lazy_static! {
     pub static ref INITPROC: Arc<ProcessControlBlock> = {
-        let inode = open_file("initproc", OpenFlags::RDONLY).unwrap();
-        let v = inode.read_all();
+        let inode = lookup(&root(), "initproc").unwrap();
+        let v = read_all(inode.inode());
         ProcessControlBlock::new(v.as_slice())
     };
 }

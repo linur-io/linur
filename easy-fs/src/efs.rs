@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{
-    block_cache_sync_all, get_block_cache, Bitmap, BlockDevice, DiskInode, DiskInodeType, Inode,
-    SuperBlock,
+    block_cache_sync_all, get_block_cache, Bitmap, BlockDevice, DirEntry, DiskInode, DiskInodeType,
+    Inode, SuperBlock, DIRENT_SZ,
 };
 use crate::BLOCK_SZ;
 use alloc::sync::Arc;
@@ -71,13 +71,20 @@ impl EasyFileSystem {
             },
         );
         // write back immediately
-        // create a inode for root node "/"
+        // create an inode for the root node "/" and give it its "." and ".." entries
         assert_eq!(efs.alloc_inode(), 0);
         let (root_inode_block_id, root_inode_offset) = efs.get_disk_inode_pos(0);
+        let root_data_block = efs.alloc_data();
+        let dot = DirEntry::new(".", 0);
+        let dotdot = DirEntry::new("..", 0);
         get_block_cache(root_inode_block_id as usize, Arc::clone(&block_device))
             .lock()
             .modify(root_inode_offset, |disk_inode: &mut DiskInode| {
                 disk_inode.initialize(DiskInodeType::Directory);
+                disk_inode.size = (2 * DIRENT_SZ) as u32;
+                disk_inode.direct[0] = root_data_block;
+                disk_inode.write_at(0, dot.as_bytes(), &block_device);
+                disk_inode.write_at(DIRENT_SZ, dotdot.as_bytes(), &block_device);
             });
         block_cache_sync_all();
         Arc::new(Mutex::new(efs))

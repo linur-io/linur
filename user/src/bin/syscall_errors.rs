@@ -182,7 +182,11 @@ pub fn main() -> i32 {
     );
 
     // A file that exists but is not an ELF image.
-    let fd = open("badelf\0", OpenFlags::CREATE | OpenFlags::WRONLY);
+    let fd = open(
+        "badelf\0",
+        OpenFlags::CREATE | OpenFlags::WRONLY | OpenFlags::TRUNC,
+        0o666,
+    );
     write(fd as usize, b"not an elf");
     close(fd as usize);
     check(
@@ -256,7 +260,7 @@ pub fn main() -> i32 {
     // libc layer: -1 plus errno().
     check_errno(
         "open no such file",
-        open("no_such_file\0", OpenFlags::RDONLY),
+        open("no_such_file\0", OpenFlags::RDONLY, 0),
         -1,
         ENOENT,
         &mut passed,

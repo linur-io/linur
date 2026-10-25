@@ -23,11 +23,23 @@ pub const ENOMEM: isize = -12;
 /// Bad address: the user pointer range is not mapped, not user-accessible, or
 /// not writable where the kernel writes.
 pub const EFAULT: isize = -14;
+/// File exists.
+pub const EEXIST: isize = -17;
+/// A path component is not a directory.
+pub const ENOTDIR: isize = -20;
+/// Is a directory.
+pub const EISDIR: isize = -21;
 /// Invalid argument to a known syscall.
 pub const EINVAL: isize = -22;
+/// Illegal seek: the file is a pipe or a terminal.
+pub const ESPIPE: isize = -29;
+/// Numerical result out of range, such as a too-small `getcwd` buffer.
+pub const ERANGE: isize = -34;
 /// The deadlock detector refuses the request.
 pub const EDEADLK: isize = -35;
 /// A name longer than one directory entry.
 pub const ENAMETOOLONG: isize = -36;
 /// Unknown syscall id.
 pub const ENOSYS: isize = -38;
+/// Directory not empty.
+pub const ENOTEMPTY: isize = -39;

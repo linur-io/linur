@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::File;
+use super::stat::{S_IFIFO, Stat};
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
 use alloc::sync::{Arc, Weak};
@@ -113,7 +114,7 @@ impl File for Pipe {
     fn writable(&self) -> bool {
         self.writable
     }
-    fn read(&self, buf: UserBuffer) -> usize {
+    fn read(&self, buf: UserBuffer) -> Result<usize, isize> {
         assert!(self.readable());
         let want_to_read = buf.len();
         let mut buf_iter = buf.into_iter();
@@ -123,7 +124,7 @@ impl File for Pipe {
             let loop_read = ring_buffer.available_read();
             if loop_read == 0 {
                 if ring_buffer.all_write_ends_closed() {
-                    return already_read;
+                    return Ok(already_read);
                 }
                 drop(ring_buffer);
                 suspend_current_and_run_next();
@@ -136,15 +137,15 @@ impl File for Pipe {
                     }
                     already_read += 1;
                     if already_read == want_to_read {
-                        return want_to_read;
+                        return Ok(want_to_read);
                     }
                 } else {
-                    return already_read;
+                    return Ok(already_read);
                 }
             }
         }
     }
-    fn write(&self, buf: UserBuffer) -> usize {
+    fn write(&self, buf: UserBuffer) -> Result<usize, isize> {
         assert!(self.writable());
         let want_to_write = buf.len();
         let mut buf_iter = buf.into_iter();
@@ -163,12 +164,21 @@ impl File for Pipe {
                     ring_buffer.write_byte(unsafe { *byte_ref });
                     already_write += 1;
                     if already_write == want_to_write {
-                        return want_to_write;
+                        return Ok(want_to_write);
                     }
                 } else {
-                    return already_write;
+                    return Ok(already_write);
                 }
             }
         }
+    }
+    fn stat(&self) -> Result<Stat, isize> {
+        Ok(Stat {
+            st_dev: 1,
+            st_mode: S_IFIFO | 0o600,
+            st_nlink: 1,
+            st_blksize: 512,
+            ..Default::default()
+        })
     }
 }

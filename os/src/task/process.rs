@@ -5,7 +5,7 @@ use super::manager::insert_into_pid2process;
 use super::{PidHandle, pid_alloc};
 use super::{SignalFlags, add_task};
 use crate::config::USER_STACK_SIZE;
-use crate::fs::{File, Stdin, Stdout};
+use crate::fs::{Dentry, FileDescriptor, Stdin, Stdout, root};
 use crate::mm::{KERNEL_SPACE, MemorySet, copy_to_user};
 use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{TrapContext, trap_handler};
@@ -28,7 +28,8 @@ pub struct ProcessControlBlockInner {
     pub parent: Option<Weak<ProcessControlBlock>>,
     pub children: Vec<Arc<ProcessControlBlock>>,
     pub exit_code: i32,
-    pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    pub cwd: Arc<Dentry>,
+    pub fd_table: Vec<Option<FileDescriptor>>,
     pub signals: SignalFlags,
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
     pub task_res_allocator: RecycleAllocator,
@@ -210,13 +211,14 @@ impl ProcessControlBlock {
                     parent: None,
                     children: Vec::new(),
                     exit_code: 0,
+                    cwd: root(),
                     fd_table: vec![
                         // 0 -> stdin
-                        Some(Arc::new(Stdin)),
+                        Some(FileDescriptor::new(Arc::new(Stdin), false)),
                         // 1 -> stdout
-                        Some(Arc::new(Stdout)),
+                        Some(FileDescriptor::new(Arc::new(Stdout), false)),
                         // 2 -> stderr
-                        Some(Arc::new(Stdout)),
+                        Some(FileDescriptor::new(Arc::new(Stdout), false)),
                     ],
                     signals: SignalFlags::empty(),
                     tasks: Vec::new(),
@@ -319,6 +321,14 @@ impl ProcessControlBlock {
         trap_cx.x[10] = args.len();
         trap_cx.x[11] = argv_base;
         *task_inner.get_trap_cx() = trap_cx;
+        drop(task_inner);
+        // The new image is installed, so this exec succeeds: close CLOEXEC fds.
+        let mut inner = self.inner_exclusive_access();
+        for fd in inner.fd_table.iter_mut() {
+            if fd.as_ref().is_some_and(|descriptor| descriptor.cloexec) {
+                *fd = None;
+            }
+        }
         true
     }
 
@@ -330,15 +340,6 @@ impl ProcessControlBlock {
         let memory_set = MemorySet::from_existed_user(&parent.memory_set);
         // alloc a pid
         let pid = pid_alloc();
-        // copy fd table
-        let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
-        for fd in parent.fd_table.iter() {
-            if let Some(file) = fd {
-                new_fd_table.push(Some(file.clone()));
-            } else {
-                new_fd_table.push(None);
-            }
-        }
         // create child process pcb
         let child = Arc::new(Self {
             pid,
@@ -349,7 +350,8 @@ impl ProcessControlBlock {
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),
                     exit_code: 0,
-                    fd_table: new_fd_table,
+                    cwd: Arc::clone(&parent.cwd),
+                    fd_table: parent.fd_table.clone(),
                     signals: SignalFlags::empty(),
                     tasks: Vec::new(),
                     task_res_allocator: RecycleAllocator::new(),
