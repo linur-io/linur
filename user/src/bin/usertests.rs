@@ -14,6 +14,7 @@ extern crate user_lib;
 //   usertests    this runner
 //   ch5_exit0, ch5_exit1, ch5_getpid  spawned helpers of spawn0/spawn1 (M2.1)
 //   ch5_stride0-5                     spawned helpers of ch5_stride (M2.1)
+//   cloexec_child                     spawned helper of cloexec_test (M2.2)
 
 // item of TESTS : app_name(argv_0), argv_1, argv_2, argv_3, exit_code
 static SUCC_TESTS: &[(&str, &str, &str, &str, i32)] = &[
@@ -76,6 +77,15 @@ static SUCC_TESTS: &[(&str, &str, &str, &str, i32)] = &[
     ("ch5_setprio\0", "\0", "\0", "\0", 0),
     ("ch5_stride\0", "\0", "\0", "\0", 0),
     ("trace_test\0", "\0", "\0", "\0", 0),
+    // M2.2: the VFS with paths seed suite (docs/vfs.md §12)
+    ("path_test\0", "\0", "\0", "\0", 0),
+    ("dir_test\0", "\0", "\0", "\0", 0),
+    ("link_test\0", "\0", "\0", "\0", 0),
+    ("rename_test\0", "\0", "\0", "\0", 0),
+    ("lseek_test\0", "\0", "\0", "\0", 0),
+    ("stat_test\0", "\0", "\0", "\0", 0),
+    ("open_flags_test\0", "\0", "\0", "\0", 0),
+    ("cloexec_test\0", "\0", "\0", "\0", 0),
 ];
 
 static FAIL_TESTS: &[(&str, &str, &str, &str, i32)] = &[

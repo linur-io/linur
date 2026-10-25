@@ -21,7 +21,7 @@ else
     dir=verify
     test_app=1
 fi
-expected_tests=64
+expected_tests=72
 rm -rf "$dir"
 mkdir -p "$dir"
 
