@@ -122,10 +122,16 @@ table is per architecture — `os/src/syscall/table.rs` holds the riscv64 table
 | −11 | `EAGAIN` | `waitpid`/`waittid`: child or thread has not exited |
 | −12 | `ENOMEM` | `brk`: request below the heap bottom or overlapping a mapping |
 | −14 | `EFAULT` | the pointer range is not accessible (see §2) |
+| −17 | `EEXIST` | `open` with `O_CREAT` and `O_EXCL` on an existing path; `mkdir`; `link` on an existing name |
+| −20 | `ENOTDIR` | a path component, or a trailing `/`, that is not a directory (every path-taking call); `open` with `O_DIRECTORY` on a non-directory; `getdents64` on a non-directory; `unlink` with `AT_REMOVEDIR` on a non-directory |
+| −21 | `EISDIR` | `open` with `O_CREAT` or `O_TRUNC` on a directory, or a directory opened for writing; `read` on a directory; `unlink` of a directory without `AT_REMOVEDIR` |
 | −22 | `EINVAL` | bad flag bits, object id, signal, or multithreaded `fork`/`exec` |
+| −29 | `ESPIPE` | `lseek` on a character device (`stdin`/`stdout`) or a pipe |
+| −34 | `ERANGE` | `getcwd` with a buffer smaller than the path plus its NUL |
 | −35 | `EDEADLK` | the deadlock detector refuses the request |
 | −36 | `ENAMETOOLONG` | a name longer than one directory entry |
 | −38 | `ENOSYS` | unknown syscall number |
+| −39 | `ENOTEMPTY` | `unlink`/`rmdir` of a directory that still holds entries beyond `.` and `..`; `rename` onto an existing directory (M2.2 refuses even an empty one) |
 
 **`waittid` takes a status pointer**, like `waitpid`: `waittid(tid, int *status)`
 returns the tid. An exit code is therefore never the syscall result, so a

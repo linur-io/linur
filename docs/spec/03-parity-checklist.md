@@ -69,17 +69,17 @@ Every row must end as exactly one of:
 
 | item | Linux 0.11 | linur target | status |
 |---|---|---|---|
-| VFS layer | fixed switch statements on inode mode bits | real inode/dentry/superblock objects | TODO M2.2 |
-| paths | component walk, no MAX_PATH check | walker with dot, dotdot, cwd | TODO M2.2 |
+| VFS layer | fixed switch statements on inode mode bits | real inode/dentry/superblock objects | DONE (M2.2: superblock, dentry and inode objects) |
+| paths | component walk, no MAX_PATH check | walker with dot, dotdot, cwd | DONE (M2.2: `.`/`..` through real entries; 27-byte components, 4096-byte paths) |
 | name length | 14 characters | long names | DELTA F11 |
-| on-disk format | MINIX v1, 1 KiB blocks, 32-byte inodes, 7+1+1 zones | own format on the easy-fs lineage | DELTA F12 |
+| on-disk format | MINIX v1, 1 KiB blocks, 32-byte inodes, 7+1+1 zones | own format on the easy-fs lineage | DELTA F12 (v2: `nlink`, 27 direct entries, real `.`/`..` entries) |
 | buffer cache | hash queue + free list, read-ahead, elevator | hash queues, delayed write, `sync` | TODO M2.4 |
 | mounts | table of 8, MINIX only, no fs-type argument | mount table, at least one filesystem | TODO M2.3 |
 | permissions | owner/group/other, `suser()`, `chmod`, `chown`, `umask` | same | TODO M2.3 |
-| fd table | `NR_OPEN` 20, global file table of 64 | no artificial limit | DELTA F4 |
+| fd table | `NR_OPEN` 20, global file table of 64 | no artificial limit | DELTA F4 (per-descriptor `CLOEXEC` since M2.2) |
 | pipes | pipe inode, one page, `SIGPIPE` with no readers | same, with `SIGPIPE` | TODO M6.2 |
 | device nodes | `/dev/null`, `/dev/port` real; mem devices return EIO | same, honest behaviour | TODO M6.2 |
-| file syscalls | stat, fstat, lseek, dup, dup2, link, unlink, mkdir, rmdir, mknod, chmod, chown, utime, access, umask, sync, truncate | all present | TODO M2.1–M2.3, M6.1 |
+| file syscalls | stat, fstat, lseek, dup, dup2, link, unlink, mkdir, rmdir, mknod, chmod, chown, utime, access, umask, sync, truncate | all present | WIP M2.2 → DONE M6.1 (M2.2 adds `stat`, `fstat`, `lseek`, `link`, `unlink`, `mkdir`, `rmdir`; remains `mknod` M2.3, mode/uid/gid checks and `chmod`/`chown`/`access`/`umask` M2.3, `utime` M3.5, `sync` M6.1) |
 | `ioctl` / `fcntl` | tty ioctls and terminal line settings; a partial `fcntl` | same subset | TODO M6.1 |
 | symlinks, `/proc` | absent | absent for v1.0 | DEFER |
 
@@ -119,20 +119,20 @@ Every row must end as exactly one of:
 | 2 | `fork` | WIP M1.3 → DONE M4.1 (COW) |
 | 3 | `read` | DONE |
 | 4 | `write` | DONE |
-| 5 | `open` | WIP M1.3 → DONE M2.2 (Linux flag values; errno done at M1.3) |
+| 5 | `open` | DONE (M2.2: Linux flag values, errno, per-descriptor `CLOEXEC`; `mode` accepted but unused until M2.3) |
 | 6 | `close` | DONE |
 | 7 | `waitpid` | WIP M1.3 → DONE M6.1 (blocking at M1.3; options at M6.1) |
-| 8 | `creat` | TODO M2.2 |
-| 9 | `link` | TODO M2.2 |
-| 10 | `unlink` | TODO M2.2 |
+| 8 | `creat` | DONE (M2.2: libc wrapper over `open` with `O_CREAT`, `O_WRONLY` and `O_TRUNC`; no separate number, as on Linux) |
+| 9 | `link` | DONE (M2.2: hard link with on-disk `nlink`) |
+| 10 | `unlink` | DONE (M2.2; `rmdir` is `AT_REMOVEDIR` 0x200) |
 | 11 | `execve` | WIP M1.3 → DONE M2.5 (envp and shebang; errno done at M1.3) |
-| 12 | `chdir` | TODO M2.2 |
+| 12 | `chdir` | DONE (M2.2: per-process cwd) |
 | 13 | `time` | WIP M1.3 → DONE M3.5: today it returns monotonic milliseconds; must return wall-clock seconds |
-| 14 | `mknod` | TODO M2.2 |
+| 14 | `mknod` | TODO M2.3 |
 | 15 | `chmod` | TODO M2.3 |
 | 16 | `chown` | TODO M2.3 |
-| 18 | `stat` | TODO M2.2 |
-| 19 | `lseek` | TODO M2.2 |
+| 18 | `stat` | DONE (M2.2: Linux riscv64 128-byte `struct stat`) |
+| 19 | `lseek` | DONE (M2.2: `SEEK_SET`/`SEEK_CUR`/`SEEK_END`) |
 | 20 | `getpid` | DONE |
 | 21 | `mount` | TODO M6.1 |
 | 22 | `umount` | TODO M6.1 |
@@ -140,15 +140,15 @@ Every row must end as exactly one of:
 | 24 | `getuid` | TODO M6.1 |
 | 25 | `stime` | TODO M3.5 |
 | 27 | `alarm` | TODO M3.5 |
-| 28 | `fstat` | TODO M2.2 |
+| 28 | `fstat` | DONE (M2.2) |
 | 29 | `pause` | TODO M3.5 |
 | 30 | `utime` | TODO M3.5 |
 | 33 | `access` | TODO M2.3 |
 | 34 | `nice` | TODO M3.5 |
 | 36 | `sync` | TODO M6.1 (cache flush exists at M2.4) |
 | 37 | `kill` | WIP M1.3 → DONE M3.5: today a five-bit mask; must take real signal numbers (M3.2) and support groups (M3.5) |
-| 39 | `mkdir` | TODO M2.2 |
-| 40 | `rmdir` | TODO M2.2 |
+| 39 | `mkdir` | DONE (M2.2) |
+| 40 | `rmdir` | DONE (M2.2: `unlink` with `AT_REMOVEDIR` 0x200) |
 | 41 | `dup` | DONE |
 | 42 | `pipe` | DONE |
 | 43 | `times` | TODO M3.5 |
@@ -174,7 +174,7 @@ Every row must end as exactly one of:
 | 70 | `setreuid` | TODO M6.1 |
 | 71 | `setregid` | TODO M6.1 |
 
-Calls linur has that 0.11 does not: the 12 thread and synchronisation calls (1000–1032), the lab call 469 and the documented extensions 1040–1043 (`spawn`, `trace`, `set_priority`, `dup2` — `dup2` only because riscv64 Linux keeps `dup3`). The 1040–1043 family follows the 1000+ convention; all are recorded in `spec/01` §4 and are deliberate extensions, not parity gaps.
+Calls linur has that 0.11 does not: `getcwd` 17, `rename` 38 (0.11's number 38 is an `-ENOSYS` stub) and `getdents64` 61; the 12 thread and synchronisation calls (1000–1032), the lab call 469 and the documented extensions 1040–1043 (`spawn`, `trace`, `set_priority`, `dup2` — `dup2` only because riscv64 Linux keeps `dup3`). The 1040–1043 family follows the 1000+ convention; all are recorded in `spec/01` §4 and are deliberate extensions, not parity gaps.
 
 ## 9. Userland and toolchain
 
@@ -192,7 +192,7 @@ Calls linur has that 0.11 does not: the 12 thread and synchronisation calls (100
 | item | Linux 0.11 | linur target | status |
 |---|---|---|---|
 | configuration | Makefile plus `config.h` | `config/<board>.toml` → generated consts | DELTA F8, TODO M5.1 |
-| test suite | none in tree | `make verify` + host tests + userland suite | DONE (M2.1 adds the 13 lab regression tests; 64 in total) |
+| test suite | none in tree | `make verify` + host tests + userland suite | DONE (M2.1 adds the 13 lab regression tests; M2.2 adds the 8 VFS programs — 72 in total, `verify/report.txt`) |
 | CI | none | every milestone gate, both architectures | WIP M1.4 → DONE M5.4 (per-architecture capability matrix from M1.5: riscv64 full suite, x86_64 smoke path (`docs/x86_64-smoke.md`), x86_64 compile-only check — `verify/report.json`; the x86_64 full suite is M5.4) |
 | parity evidence | — | this file, updated at each gate | WIP → DONE M6.4 |
 

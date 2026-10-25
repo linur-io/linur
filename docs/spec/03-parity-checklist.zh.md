@@ -70,17 +70,17 @@
 
 | 条目 | Linux 0.11 | linur 目标 | 状态 |
 |---|---|---|---|
-| VFS 层 | 针对 inode 模式位的固定 switch 语句 | 真正的 inode/dentry/superblock 对象 | TODO M2.2 |
-| 路径 | 逐分量遍历，没有 MAX_PATH 检查 | 支持 dot、dotdot、cwd 的遍历器 | TODO M2.2 |
+| VFS 层 | 针对 inode 模式位的固定 switch 语句 | 真正的 inode/dentry/superblock 对象 | DONE（M2.2：superblock、dentry 与 inode 对象） |
+| 路径 | 逐分量遍历，没有 MAX_PATH 检查 | 支持 dot、dotdot、cwd 的遍历器 | DONE（M2.2：`.`/`..` 走真实目录项；分量 27 字节、路径 4096 字节） |
 | 名称长度 | 14 个字符 | 长文件名 | DELTA F11 |
-| 磁盘格式 | MINIX v1，1 KiB 块，32 字节 inode，7+1+1 个区 | 沿 easy-fs 一脉的自有格式 | DELTA F12 |
+| 磁盘格式 | MINIX v1，1 KiB 块，32 字节 inode，7+1+1 个区 | 沿 easy-fs 一脉的自有格式 | DELTA F12（v2：`nlink`、27 个直接表项、真实的 `.`/`..` 目录项） |
 | 缓冲区缓存 | 哈希队列 + 空闲链表，预读，电梯 | 哈希队列，延迟写，`sync` | TODO M2.4 |
 | 挂载 | 8 项的表，仅 MINIX，没有文件系统类型参数 | 挂载表，至少一种文件系统 | TODO M2.3 |
 | 权限 | owner/group/other、`suser()`、`chmod`、`chown`、`umask` | 相同 | TODO M2.3 |
-| fd 表 | `NR_OPEN` 20，全局文件表 64 | 没有人为上限 | DELTA F4 |
+| fd 表 | `NR_OPEN` 20，全局文件表 64 | 没有人为上限 | DELTA F4（自 M2.2 起按描述符的 `CLOEXEC`） |
 | 管道 | 管道 inode，一页，无读者时 `SIGPIPE` | 相同，带 `SIGPIPE` | TODO M6.2 |
 | 设备节点 | `/dev/null`、`/dev/port` 为真实设备；mem 设备返回 EIO | 相同，行为诚实 | TODO M6.2 |
-| 文件系统调用 | stat, fstat, lseek, dup, dup2, link, unlink, mkdir, rmdir, mknod, chmod, chown, utime, access, umask, sync, truncate | 全部提供 | TODO M2.1–M2.3, M6.1 |
+| 文件系统调用 | stat, fstat, lseek, dup, dup2, link, unlink, mkdir, rmdir, mknod, chmod, chown, utime, access, umask, sync, truncate | 全部提供 | WIP M2.2 → DONE M6.1（M2.2 新增 `stat`、`fstat`、`lseek`、`link`、`unlink`、`mkdir`、`rmdir`；余下 `mknod` M2.3，mode/uid/gid 检查与 `chmod`/`chown`/`access`/`umask` M2.3，`utime` M3.5，`sync` M6.1） |
 | `ioctl` / `fcntl` | tty ioctl 与终端线路设置；部分实现的 `fcntl` | 相同的子集 | TODO M6.1 |
 | 符号链接、`/proc` | 无 | v1.0 不提供 | DEFER |
 
@@ -120,20 +120,20 @@
 | 2 | `fork` | WIP M1.3 → DONE M4.1（COW） |
 | 3 | `read` | DONE |
 | 4 | `write` | DONE |
-| 5 | `open` | WIP M1.3 → DONE M2.2（Linux 的标志值；errno 已在 M1.3 完成） |
+| 5 | `open` | DONE（M2.2：Linux 标志值、errno、按描述符 `CLOEXEC`；`mode` 已接受但在 M2.3 前不使用） |
 | 6 | `close` | DONE |
 | 7 | `waitpid` | WIP M1.3 → DONE M6.1（M1.3 起阻塞；选项在 M6.1） |
-| 8 | `creat` | TODO M2.2 |
-| 9 | `link` | TODO M2.2 |
-| 10 | `unlink` | TODO M2.2 |
+| 8 | `creat` | DONE（M2.2：`open` 配 `O_CREAT`、`O_WRONLY`、`O_TRUNC` 的 libc 包装；与 Linux 一样没有独立编号） |
+| 9 | `link` | DONE（M2.2：硬链接，磁盘上带 `nlink`） |
+| 10 | `unlink` | DONE（M2.2；`rmdir` 即 `AT_REMOVEDIR` 0x200） |
 | 11 | `execve` | WIP M1.3 → DONE M2.5（envp 与 shebang；errno 已在 M1.3 完成） |
-| 12 | `chdir` | TODO M2.2 |
+| 12 | `chdir` | DONE（M2.2：每进程 cwd） |
 | 13 | `time` | WIP M1.3 → DONE M3.5：目前返回单调毫秒；必须返回墙上时钟的秒数 |
-| 14 | `mknod` | TODO M2.2 |
+| 14 | `mknod` | TODO M2.3 |
 | 15 | `chmod` | TODO M2.3 |
 | 16 | `chown` | TODO M2.3 |
-| 18 | `stat` | TODO M2.2 |
-| 19 | `lseek` | TODO M2.2 |
+| 18 | `stat` | DONE（M2.2：Linux riscv64 的 128 字节 `struct stat`） |
+| 19 | `lseek` | DONE（M2.2：`SEEK_SET`/`SEEK_CUR`/`SEEK_END`） |
 | 20 | `getpid` | DONE |
 | 21 | `mount` | TODO M6.1 |
 | 22 | `umount` | TODO M6.1 |
@@ -141,15 +141,15 @@
 | 24 | `getuid` | TODO M6.1 |
 | 25 | `stime` | TODO M3.5 |
 | 27 | `alarm` | TODO M3.5 |
-| 28 | `fstat` | TODO M2.2 |
+| 28 | `fstat` | DONE（M2.2） |
 | 29 | `pause` | TODO M3.5 |
 | 30 | `utime` | TODO M3.5 |
 | 33 | `access` | TODO M2.3 |
 | 34 | `nice` | TODO M3.5 |
 | 36 | `sync` | TODO M6.1（缓存刷新在 M2.4 已有） |
 | 37 | `kill` | WIP M1.3 → DONE M3.5：目前是五位掩码；必须接受真正的信号编号（M3.2）并支持进程组（M3.5） |
-| 39 | `mkdir` | TODO M2.2 |
-| 40 | `rmdir` | TODO M2.2 |
+| 39 | `mkdir` | DONE（M2.2） |
+| 40 | `rmdir` | DONE（M2.2：`unlink` 加 `AT_REMOVEDIR` 0x200） |
 | 41 | `dup` | DONE |
 | 42 | `pipe` | DONE |
 | 43 | `times` | TODO M3.5 |
@@ -175,7 +175,7 @@
 | 70 | `setreuid` | TODO M6.1 |
 | 71 | `setregid` | TODO M6.1 |
 
-linur 有而 0.11 没有的调用：12 个线程与同步调用（1000–1032）、实验用调用 469，以及文档化扩展 1040–1043（`spawn`、`trace`、`set_priority`、`dup2` —— `dup2` 只因 riscv64 的 Linux 保留 `dup3`）。1040–1043 这一族沿用 1000+ 约定；它们都记录在 `spec/01` §4 中，属于有意为之的扩展，不构成对齐缺口。
+linur 有而 0.11 没有的调用：`getcwd` 17、`rename` 38（0.11 的编号 38 只是一个 `-ENOSYS` 桩）与 `getdents64` 61；12 个线程与同步调用（1000–1032）、实验用调用 469，以及文档化扩展 1040–1043（`spawn`、`trace`、`set_priority`、`dup2` —— `dup2` 只因 riscv64 的 Linux 保留 `dup3`）。1040–1043 这一族沿用 1000+ 约定；它们都记录在 `spec/01` §4 中，属于有意为之的扩展，不构成对齐缺口。
 
 ## 9. 用户态与工具链
 
@@ -193,7 +193,7 @@ linur 有而 0.11 没有的调用：12 个线程与同步调用（1000–1032）
 | 条目 | Linux 0.11 | linur 目标 | 状态 |
 |---|---|---|---|
 | 配置 | Makefile 加 `config.h` | `config/<board>.toml` → 生成的常量 | DELTA F8, TODO M5.1 |
-| 测试套件 | 源码树里没有 | `make verify` + 宿主机测试 + 用户态套件 | DONE（M2.1 新增 13 项实验回归测试；共 64 项） |
+| 测试套件 | 源码树里没有 | `make verify` + 宿主机测试 + 用户态套件 | DONE（M2.1 新增 13 项实验回归测试；M2.2 新增 8 个 VFS 程序 —— 共 72 项，`verify/report.txt`） |
 | CI | 无 | 每个里程碑门禁，两种架构 | WIP M1.4 → DONE M5.4（自 M1.5 起按架构的能力矩阵：riscv64 完整套件、x86_64 冒烟路径（`docs/x86_64-smoke.md`）、x86_64 仅编译检查 —— `verify/report.json`；x86_64 的完整套件在 M5.4） |
 | 对齐证据 | — | 本文件，在每个门禁处更新 | WIP → DONE M6.4 |
 
