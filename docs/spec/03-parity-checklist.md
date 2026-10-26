@@ -72,14 +72,14 @@ Every row must end as exactly one of:
 | VFS layer | fixed switch statements on inode mode bits | real inode/dentry/superblock objects | DONE (M2.2: superblock, dentry and inode objects) |
 | paths | component walk, no MAX_PATH check | walker with dot, dotdot, cwd | DONE (M2.2: `.`/`..` through real entries; 27-byte components, 4096-byte paths) |
 | name length | 14 characters | long names | DELTA F11 |
-| on-disk format | MINIX v1, 1 KiB blocks, 32-byte inodes, 7+1+1 zones | own format on the easy-fs lineage | DELTA F12 (v2: `nlink`, 27 direct entries, real `.`/`..` entries) |
+| on-disk format | MINIX v1, 1 KiB blocks, 32-byte inodes, 7+1+1 zones | own format on the easy-fs lineage | DELTA F12 (v3: `mode`/`uid`/`gid`, 26 direct entries, device number in `direct[0]` — `docs/perm.md` §3) |
 | buffer cache | hash queue + free list, read-ahead, elevator | hash queues, delayed write, `sync` | TODO M2.4 |
-| mounts | table of 8, MINIX only, no fs-type argument | mount table, at least one filesystem | TODO M2.3 |
-| permissions | owner/group/other, `suser()`, `chmod`, `chown`, `umask` | same | TODO M2.3 |
+| mounts | table of 8, MINIX only, no fs-type argument | mount table, at least one filesystem | DONE (M2.3: the mount table in `os/src/fs/mount.rs` holds one filesystem; `mount()`/`umount()` stay M6.1 — `docs/perm.md` §5) |
+| permissions | owner/group/other, `suser()`, `chmod`, `chown`, `umask` | same | DONE (M2.3: mode/uid/gid on disk, `umask`, the `permission()` predicate at the 0.11 call sites — `docs/perm.md` §2/§6) |
 | fd table | `NR_OPEN` 20, global file table of 64 | no artificial limit | DELTA F4 (per-descriptor `CLOEXEC` since M2.2) |
 | pipes | pipe inode, one page, `SIGPIPE` with no readers | same, with `SIGPIPE` | TODO M6.2 |
-| device nodes | `/dev/null`, `/dev/port` real; mem devices return EIO | same, honest behaviour | TODO M6.2 |
-| file syscalls | stat, fstat, lseek, dup, dup2, link, unlink, mkdir, rmdir, mknod, chmod, chown, utime, access, umask, sync, truncate | all present | WIP M2.2 → DONE M6.1 (M2.2 adds `stat`, `fstat`, `lseek`, `link`, `unlink`, `mkdir`, `rmdir`; remains `mknod` M2.3, mode/uid/gid checks and `chmod`/`chown`/`access`/`umask` M2.3, `utime` M3.5, `sync` M6.1) |
+| device nodes | `/dev/null`, `/dev/port` real; mem devices return EIO | same, honest behaviour | TODO M6.2 (M2.3 gives the `/dev` skeleton and real device-node inodes; `open` is `ENXIO` until the device table exists at M3.1, the devices themselves are M6.2 — `docs/perm.md` §5/§9) |
+| file syscalls | stat, fstat, lseek, dup, dup2, link, unlink, mkdir, rmdir, mknod, chmod, chown, utime, access, umask, sync, truncate | all present | WIP M2.2 → DONE M6.1 (M2.2 adds `stat`, `fstat`, `lseek`, `link`, `unlink`, `mkdir`, `rmdir`; M2.3 adds `mknod`, `chmod`, `chown`, `access`, `umask` and the mode/uid/gid checks; remains `utime` M3.5, `sync` M6.1) |
 | `ioctl` / `fcntl` | tty ioctls and terminal line settings; a partial `fcntl` | same subset | TODO M6.1 |
 | symlinks, `/proc` | absent | absent for v1.0 | DEFER |
 
@@ -119,7 +119,7 @@ Every row must end as exactly one of:
 | 2 | `fork` | WIP M1.3 → DONE M4.1 (COW) |
 | 3 | `read` | DONE |
 | 4 | `write` | DONE |
-| 5 | `open` | DONE (M2.2: Linux flag values, errno, per-descriptor `CLOEXEC`; `mode` accepted but unused until M2.3) |
+| 5 | `open` | DONE (M2.2: Linux flag values, errno, per-descriptor `CLOEXEC`; `mode` used since M2.3, masked by umask) |
 | 6 | `close` | DONE |
 | 7 | `waitpid` | WIP M1.3 → DONE M6.1 (blocking at M1.3; options at M6.1) |
 | 8 | `creat` | DONE (M2.2: libc wrapper over `open` with `O_CREAT`, `O_WRONLY` and `O_TRUNC`; no separate number, as on Linux) |
@@ -128,9 +128,9 @@ Every row must end as exactly one of:
 | 11 | `execve` | WIP M1.3 → DONE M2.5 (envp and shebang; errno done at M1.3) |
 | 12 | `chdir` | DONE (M2.2: per-process cwd) |
 | 13 | `time` | WIP M1.3 → DONE M3.5: today it returns monotonic milliseconds; must return wall-clock seconds |
-| 14 | `mknod` | TODO M2.3 |
-| 15 | `chmod` | TODO M2.3 |
-| 16 | `chown` | TODO M2.3 |
+| 14 | `mknod` | DONE (M2.3: `S_IFREG`/`S_IFCHR`/`S_IFBLK`/`S_IFIFO`; a bare permission word or `S_IFDIR` is `EINVAL`; umask masks the permission bits — `docs/perm.md` §7) |
+| 15 | `chmod` | DONE (M2.3: the permission bits only, the type is kept) |
+| 16 | `chown` | DONE (M2.3: `u32::MAX` leaves that half unchanged, a divergence from 0.11's literal assignment — `spec/01` §4) |
 | 18 | `stat` | DONE (M2.2: Linux riscv64 128-byte `struct stat`) |
 | 19 | `lseek` | DONE (M2.2: `SEEK_SET`/`SEEK_CUR`/`SEEK_END`) |
 | 20 | `getpid` | DONE |
@@ -143,7 +143,7 @@ Every row must end as exactly one of:
 | 28 | `fstat` | DONE (M2.2) |
 | 29 | `pause` | TODO M3.5 |
 | 30 | `utime` | TODO M3.5 |
-| 33 | `access` | TODO M2.3 |
+| 33 | `access` | DONE (M2.3: the requested bits; `F_OK` checks existence; a path that does not resolve is `EACCES`, as in 0.11) |
 | 34 | `nice` | TODO M3.5 |
 | 36 | `sync` | TODO M6.1 (cache flush exists at M2.4) |
 | 37 | `kill` | WIP M1.3 → DONE M3.5: today a five-bit mask; must take real signal numbers (M3.2) and support groups (M3.5) |
@@ -162,7 +162,7 @@ Every row must end as exactly one of:
 | 55 | `fcntl` | TODO M6.1 |
 | 57 | `setpgid` | TODO M3.5 |
 | 59 | `uname` | TODO M6.1 |
-| 60 | `umask` | TODO M2.3 |
+| 60 | `umask` | DONE (M2.3: stores `mask & 0o777`, returns the previous value; applied by `open` with `O_CREAT`, `mkdir` and `mknod`) |
 | 61 | `chroot` | TODO M6.1 |
 | 63 | `dup2` | DONE (extension 1043) |
 | 64 | `getppid` | TODO M3.5 |
@@ -192,7 +192,7 @@ Calls linur has that 0.11 does not: `getcwd` 17, `rename` 38 (0.11's number 38 i
 | item | Linux 0.11 | linur target | status |
 |---|---|---|---|
 | configuration | Makefile plus `config.h` | `config/<board>.toml` → generated consts | DELTA F8, TODO M5.1 |
-| test suite | none in tree | `make verify` + host tests + userland suite | DONE (M2.1 adds the 13 lab regression tests; M2.2 adds the 8 VFS programs — 72 in total, `verify/report.txt`) |
+| test suite | none in tree | `make verify` + host tests + userland suite | DONE (M2.1 adds the 13 lab regression tests; M2.2 adds the 8 VFS programs; M2.3 adds `perm_test`, `dev_test` and `mount_test` — 75 in total, `verify/report.txt`) |
 | CI | none | every milestone gate, both architectures | WIP M1.4 → DONE M5.4 (per-architecture capability matrix from M1.5: riscv64 full suite, x86_64 smoke path (`docs/x86_64-smoke.md`), x86_64 compile-only check — `verify/report.json`; the x86_64 full suite is M5.4) |
 | parity evidence | — | this file, updated at each gate | WIP → DONE M6.4 |
 

@@ -73,14 +73,14 @@
 | VFS 层 | 针对 inode 模式位的固定 switch 语句 | 真正的 inode/dentry/superblock 对象 | DONE（M2.2：superblock、dentry 与 inode 对象） |
 | 路径 | 逐分量遍历，没有 MAX_PATH 检查 | 支持 dot、dotdot、cwd 的遍历器 | DONE（M2.2：`.`/`..` 走真实目录项；分量 27 字节、路径 4096 字节） |
 | 名称长度 | 14 个字符 | 长文件名 | DELTA F11 |
-| 磁盘格式 | MINIX v1，1 KiB 块，32 字节 inode，7+1+1 个区 | 沿 easy-fs 一脉的自有格式 | DELTA F12（v2：`nlink`、27 个直接表项、真实的 `.`/`..` 目录项） |
+| 磁盘格式 | MINIX v1，1 KiB 块，32 字节 inode，7+1+1 个区 | 沿 easy-fs 一脉的自有格式 | DELTA F12（v3：`mode`/`uid`/`gid`、26 个直接表项、设备号存在 `direct[0]` —— `docs/perm.md` §3） |
 | 缓冲区缓存 | 哈希队列 + 空闲链表，预读，电梯 | 哈希队列，延迟写，`sync` | TODO M2.4 |
-| 挂载 | 8 项的表，仅 MINIX，没有文件系统类型参数 | 挂载表，至少一种文件系统 | TODO M2.3 |
-| 权限 | owner/group/other、`suser()`、`chmod`、`chown`、`umask` | 相同 | TODO M2.3 |
+| 挂载 | 8 项的表，仅 MINIX，没有文件系统类型参数 | 挂载表，至少一种文件系统 | DONE（M2.3：`os/src/fs/mount.rs` 的挂载表只持有一种文件系统；`mount()`/`umount()` 仍在 M6.1 —— `docs/perm.md` §5） |
+| 权限 | owner/group/other、`suser()`、`chmod`、`chown`、`umask` | 相同 | DONE（M2.3：磁盘上的 mode/uid/gid、`umask`、在 0.11 各调用点的 `permission()` 判定 —— `docs/perm.md` §2/§6） |
 | fd 表 | `NR_OPEN` 20，全局文件表 64 | 没有人为上限 | DELTA F4（自 M2.2 起按描述符的 `CLOEXEC`） |
 | 管道 | 管道 inode，一页，无读者时 `SIGPIPE` | 相同，带 `SIGPIPE` | TODO M6.2 |
-| 设备节点 | `/dev/null`、`/dev/port` 为真实设备；mem 设备返回 EIO | 相同，行为诚实 | TODO M6.2 |
-| 文件系统调用 | stat, fstat, lseek, dup, dup2, link, unlink, mkdir, rmdir, mknod, chmod, chown, utime, access, umask, sync, truncate | 全部提供 | WIP M2.2 → DONE M6.1（M2.2 新增 `stat`、`fstat`、`lseek`、`link`、`unlink`、`mkdir`、`rmdir`；余下 `mknod` M2.3，mode/uid/gid 检查与 `chmod`/`chown`/`access`/`umask` M2.3，`utime` M3.5，`sync` M6.1） |
+| 设备节点 | `/dev/null`、`/dev/port` 为真实设备；mem 设备返回 EIO | 相同，行为诚实 | TODO M6.2（M2.3 给出 `/dev` 骨架和真正的设备节点 inode；`open` 在 M3.1 的设备表出现前返回 `ENXIO`，设备本身在 M6.2 —— `docs/perm.md` §5/§9） |
+| 文件系统调用 | stat, fstat, lseek, dup, dup2, link, unlink, mkdir, rmdir, mknod, chmod, chown, utime, access, umask, sync, truncate | 全部提供 | WIP M2.2 → DONE M6.1（M2.2 新增 `stat`、`fstat`、`lseek`、`link`、`unlink`、`mkdir`、`rmdir`；M2.3 新增 `mknod`、`chmod`、`chown`、`access`、`umask` 与 mode/uid/gid 检查；余下 `utime` M3.5，`sync` M6.1） |
 | `ioctl` / `fcntl` | tty ioctl 与终端线路设置；部分实现的 `fcntl` | 相同的子集 | TODO M6.1 |
 | 符号链接、`/proc` | 无 | v1.0 不提供 | DEFER |
 
@@ -120,7 +120,7 @@
 | 2 | `fork` | WIP M1.3 → DONE M4.1（COW） |
 | 3 | `read` | DONE |
 | 4 | `write` | DONE |
-| 5 | `open` | DONE（M2.2：Linux 标志值、errno、按描述符 `CLOEXEC`；`mode` 已接受但在 M2.3 前不使用） |
+| 5 | `open` | DONE（M2.2：Linux 标志值、errno、按描述符 `CLOEXEC`；`mode` 自 M2.3 起使用，并被 umask 掩码） |
 | 6 | `close` | DONE |
 | 7 | `waitpid` | WIP M1.3 → DONE M6.1（M1.3 起阻塞；选项在 M6.1） |
 | 8 | `creat` | DONE（M2.2：`open` 配 `O_CREAT`、`O_WRONLY`、`O_TRUNC` 的 libc 包装；与 Linux 一样没有独立编号） |
@@ -129,9 +129,9 @@
 | 11 | `execve` | WIP M1.3 → DONE M2.5（envp 与 shebang；errno 已在 M1.3 完成） |
 | 12 | `chdir` | DONE（M2.2：每进程 cwd） |
 | 13 | `time` | WIP M1.3 → DONE M3.5：目前返回单调毫秒；必须返回墙上时钟的秒数 |
-| 14 | `mknod` | TODO M2.3 |
-| 15 | `chmod` | TODO M2.3 |
-| 16 | `chown` | TODO M2.3 |
+| 14 | `mknod` | DONE（M2.3：`S_IFREG`/`S_IFCHR`/`S_IFBLK`/`S_IFIFO`；裸权限字或 `S_IFDIR` 为 `EINVAL`；umask 掩码权限位 —— `docs/perm.md` §7） |
+| 15 | `chmod` | DONE（M2.3：只取权限位，类型保留） |
+| 16 | `chown` | DONE（M2.3：`u32::MAX` 保持该半不变，与 0.11 的字面赋值不同 —— `spec/01` §4） |
 | 18 | `stat` | DONE（M2.2：Linux riscv64 的 128 字节 `struct stat`） |
 | 19 | `lseek` | DONE（M2.2：`SEEK_SET`/`SEEK_CUR`/`SEEK_END`） |
 | 20 | `getpid` | DONE |
@@ -144,7 +144,7 @@
 | 28 | `fstat` | DONE（M2.2） |
 | 29 | `pause` | TODO M3.5 |
 | 30 | `utime` | TODO M3.5 |
-| 33 | `access` | TODO M2.3 |
+| 33 | `access` | DONE（M2.3：请求的权限位；`F_OK` 只查存在；无法解析的路径返回 `EACCES`，与 0.11 一致） |
 | 34 | `nice` | TODO M3.5 |
 | 36 | `sync` | TODO M6.1（缓存刷新在 M2.4 已有） |
 | 37 | `kill` | WIP M1.3 → DONE M3.5：目前是五位掩码；必须接受真正的信号编号（M3.2）并支持进程组（M3.5） |
@@ -163,7 +163,7 @@
 | 55 | `fcntl` | TODO M6.1 |
 | 57 | `setpgid` | TODO M3.5 |
 | 59 | `uname` | TODO M6.1 |
-| 60 | `umask` | TODO M2.3 |
+| 60 | `umask` | DONE（M2.3：保存 `mask & 0o777` 并返回旧值；作用于 `O_CREAT` 的 `open`、`mkdir` 和 `mknod`） |
 | 61 | `chroot` | TODO M6.1 |
 | 63 | `dup2` | DONE（扩展 1043） |
 | 64 | `getppid` | TODO M3.5 |
@@ -193,7 +193,7 @@ linur 有而 0.11 没有的调用：`getcwd` 17、`rename` 38（0.11 的编号 3
 | 条目 | Linux 0.11 | linur 目标 | 状态 |
 |---|---|---|---|
 | 配置 | Makefile 加 `config.h` | `config/<board>.toml` → 生成的常量 | DELTA F8, TODO M5.1 |
-| 测试套件 | 源码树里没有 | `make verify` + 宿主机测试 + 用户态套件 | DONE（M2.1 新增 13 项实验回归测试；M2.2 新增 8 个 VFS 程序 —— 共 72 项，`verify/report.txt`） |
+| 测试套件 | 源码树里没有 | `make verify` + 宿主机测试 + 用户态套件 | DONE（M2.1 新增 13 项实验回归测试；M2.2 新增 8 个 VFS 程序；M2.3 新增 `perm_test`、`dev_test` 与 `mount_test` —— 共 75 项，`verify/report.txt`） |
 | CI | 无 | 每个里程碑门禁，两种架构 | WIP M1.4 → DONE M5.4（自 M1.5 起按架构的能力矩阵：riscv64 完整套件、x86_64 冒烟路径（`docs/x86_64-smoke.md`）、x86_64 仅编译检查 —— `verify/report.json`；x86_64 的完整套件在 M5.4） |
 | 对齐证据 | — | 本文件，在每个门禁处更新 | WIP → DONE M6.4 |
 

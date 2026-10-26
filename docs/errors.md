@@ -113,25 +113,34 @@ table is per architecture — `os/src/syscall/table.rs` holds the riscv64 table
 
 | value | name | produced by |
 |---|---|---|
+| −1 | `EPERM` | `chmod` unless the caller is root or the owner; `chown` and `mknod` unless root |
 | −2 | `ENOENT` | `open`/`exec`: no such file; `open("")` |
 | −3 | `ESRCH` | `kill`/`waittid`: no such process or thread |
+| −6 | `ENXIO` | `open` of a character or block device node, or of a FIFO inode: no device table until M3.1, no pipe file until M6.2 (`docs/perm.md` §5/§9) |
 | −7 | `E2BIG` | `exec`: `argv` does not fit the user stack |
 | −8 | `ENOEXEC` | `exec`: not a loadable ELF image |
 | −9 | `EBADF` | `read`/`write`/`close`/`dup`: bad descriptor |
 | −10 | `ECHILD` | `waitpid`: no such child |
 | −11 | `EAGAIN` | `waitpid`/`waittid`: child or thread has not exited |
 | −12 | `ENOMEM` | `brk`: request below the heap bottom or overlapping a mapping |
+| −13 | `EACCES` | the permission predicate of `docs/perm.md` §6: denied search, read, write or execute; `access` of a path that does not resolve; `exec`/`spawn` of a non-regular file |
 | −14 | `EFAULT` | the pointer range is not accessible (see §2) |
 | −17 | `EEXIST` | `open` with `O_CREAT` and `O_EXCL` on an existing path; `mkdir`; `link` on an existing name |
 | −20 | `ENOTDIR` | a path component, or a trailing `/`, that is not a directory (every path-taking call); `open` with `O_DIRECTORY` on a non-directory; `getdents64` on a non-directory; `unlink` with `AT_REMOVEDIR` on a non-directory |
 | −21 | `EISDIR` | `open` with `O_CREAT` or `O_TRUNC` on a directory, or a directory opened for writing; `read` on a directory; `unlink` of a directory without `AT_REMOVEDIR` |
-| −22 | `EINVAL` | bad flag bits, object id, signal, or multithreaded `fork`/`exec` |
+| −22 | `EINVAL` | bad flag bits, object id, signal, or multithreaded `fork`/`exec`; an invalid `mknod` type or an `access` mode outside 0o7 (M2.3) |
 | −29 | `ESPIPE` | `lseek` on a character device (`stdin`/`stdout`) or a pipe |
 | −34 | `ERANGE` | `getcwd` with a buffer smaller than the path plus its NUL |
 | −35 | `EDEADLK` | the deadlock detector refuses the request |
 | −36 | `ENAMETOOLONG` | a name longer than one directory entry |
 | −38 | `ENOSYS` | unknown syscall number |
 | −39 | `ENOTEMPTY` | `unlink`/`rmdir` of a directory that still holds entries beyond `.` and `..`; `rename` onto an existing directory (M2.2 refuses even an empty one) |
+
+**M2.3.** Until M6.1 adds the credential calls every process is the superuser, so
+the `EPERM` rows and every `EACCES` from the permission predicate stay dormant; the
+only observable refusals are `exec`/`spawn` of a non-regular file and `access` of
+a path that does not resolve. `ENXIO` needs a
+device node to open, and every image has `/dev` since M2.3 (`docs/perm.md` §9).
 
 **`waittid` takes a status pointer**, like `waitpid`: `waittid(tid, int *status)`
 returns the tid. An exit code is therefore never the syscall result, so a
