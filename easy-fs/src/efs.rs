@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{
-    block_cache_sync_all, get_block_cache, Bitmap, BlockDevice, DirEntry, DiskInode, DiskInodeType,
-    Inode, SuperBlock, DIRENT_SZ,
+    block_cache_sync_all, get_block_cache, Bitmap, BlockDevice, DirEntry, DiskInode, Inode,
+    SuperBlock, DIRENT_SZ, S_IFDIR,
 };
 use crate::BLOCK_SZ;
 use alloc::sync::Arc;
@@ -80,7 +80,7 @@ impl EasyFileSystem {
         get_block_cache(root_inode_block_id as usize, Arc::clone(&block_device))
             .lock()
             .modify(root_inode_offset, |disk_inode: &mut DiskInode| {
-                disk_inode.initialize(DiskInodeType::Directory);
+                disk_inode.initialize(S_IFDIR | 0o755, 0, 0);
                 disk_inode.size = (2 * DIRENT_SZ) as u32;
                 disk_inode.direct[0] = root_data_block;
                 disk_inode.write_at(0, dot.as_bytes(), &block_device);

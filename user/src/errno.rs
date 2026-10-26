@@ -21,10 +21,14 @@ pub(crate) fn set(errno: isize) {
     ERRNO.store(errno as i32, Ordering::Relaxed);
 }
 
+/// Operation not permitted.
+pub const EPERM: i32 = 1;
 /// No such file or directory.
 pub const ENOENT: i32 = 2;
 /// No such process or thread.
 pub const ESRCH: i32 = 3;
+/// No such device or address: a special file has no driver.
+pub const ENXIO: i32 = 6;
 /// Argument list too long.
 pub const E2BIG: i32 = 7;
 /// Executable format error.
@@ -37,6 +41,8 @@ pub const ECHILD: i32 = 10;
 pub const EAGAIN: i32 = 11;
 /// Out of memory: the request would exceed or overlap the user address space.
 pub const ENOMEM: i32 = 12;
+/// Permission denied.
+pub const EACCES: i32 = 13;
 /// Bad address.
 pub const EFAULT: i32 = 14;
 /// File exists.

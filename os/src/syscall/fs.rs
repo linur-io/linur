@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::errno::{EBADF, EINVAL, EISDIR, ENOTDIR, ERANGE};
+use crate::errno::{EACCES, EBADF, EINVAL, EISDIR, ENOTDIR, EPERM, ERANGE};
 use crate::fs::{
-    Dentry, File, FileDescriptor, OpenFlags, absolute_path, lookup, lookup_parent, make_pipe, open,
-    stat,
+    Cred, Dentry, File, FileDescriptor, MAY_EXEC, MAY_WRITE, OpenFlags, S_IFBLK, S_IFCHR, S_IFIFO,
+    S_IFMT, S_IFREG, absolute_path, lookup, lookup_parent, make_pipe, open, permission, stat,
 };
 use crate::mm::{copy_to_user, translated_byte_buffer, translated_byte_buffer_mut, translated_str};
 use crate::task::{current_process, current_user_token};
@@ -15,6 +15,13 @@ const AT_REMOVEDIR: u32 = 0x200;
 /// The calling process's working directory.
 fn current_cwd() -> Arc<Dentry> {
     current_process().inner_exclusive_access().cwd.clone()
+}
+
+/// The permission bits every file the caller creates loses.
+fn current_umask() -> u32 {
+    let process = current_process();
+    let inner = process.inner_exclusive_access();
+    inner.umask as u32
 }
 
 /// The open file behind `fd`, cloned so the process lock is released before the
@@ -74,8 +81,10 @@ pub fn sys_open(path: *const u8, flags: u32, mode: u32) -> isize {
     let Some(flags) = OpenFlags::from_bits(flags) else {
         return EINVAL;
     };
+    let mode = (mode & 0o7777) & !current_umask();
+    let cred = Cred::current();
     let cwd = current_cwd();
-    let file = match open(&cwd, &path, flags, mode) {
+    let file = match open(&cwd, &path, flags, mode, cred) {
         Ok(file) => file,
         Err(e) => return e,
     };
@@ -188,29 +197,38 @@ pub fn sys_chdir(path: *const u8) -> isize {
         Ok(path) => path,
         Err(e) => return e,
     };
+    let cred = Cred::current();
     let cwd = current_cwd();
-    let dentry = match lookup(&cwd, &path) {
+    let dentry = match lookup(&cwd, &path, cred) {
         Ok(dentry) => dentry,
         Err(e) => return e,
     };
     if !dentry.inode().is_dir() {
         return ENOTDIR;
     }
+    if let Err(e) = permission(dentry.inode(), MAY_EXEC, cred) {
+        return e;
+    }
     current_process().inner_exclusive_access().cwd = dentry;
     0
 }
 
-pub fn sys_mkdir(path: *const u8, _mode: u32) -> isize {
+pub fn sys_mkdir(path: *const u8, mode: u32) -> isize {
     let path = match translated_str(current_user_token(), path) {
         Ok(path) => path,
         Err(e) => return e,
     };
+    let perms = (mode & 0o7777) & !current_umask();
+    let cred = Cred::current();
     let cwd = current_cwd();
-    let (parent, name) = match lookup_parent(&cwd, &path) {
+    let (parent, name) = match lookup_parent(&cwd, &path, cred) {
         Ok(parent) => parent,
         Err(e) => return e,
     };
-    match parent.inode().create_dir(&name) {
+    if let Err(e) = permission(parent.inode(), MAY_WRITE | MAY_EXEC, cred) {
+        return e;
+    }
+    match parent.inode().create_dir(&name, perms, cred) {
         Ok(_) => 0,
         Err(e) => e,
     }
@@ -225,12 +243,13 @@ pub fn sys_unlink(path: *const u8, flags: u32) -> isize {
     if flags & !AT_REMOVEDIR != 0 {
         return EINVAL;
     }
+    let cred = Cred::current();
     let cwd = current_cwd();
-    let target = match lookup(&cwd, &path) {
+    let target = match lookup(&cwd, &path, cred) {
         Ok(target) => target,
         Err(e) => return e,
     };
-    let (parent, name) = match lookup_parent(&cwd, &path) {
+    let (parent, name) = match lookup_parent(&cwd, &path, cred) {
         Ok(parent) => parent,
         Err(e) => return e,
     };
@@ -240,6 +259,9 @@ pub fn sys_unlink(path: *const u8, flags: u32) -> isize {
         }
     } else if target.inode().is_dir() {
         return EISDIR;
+    }
+    if let Err(e) = permission(parent.inode(), MAY_WRITE | MAY_EXEC, cred) {
+        return e;
     }
     match parent.inode().remove(&name) {
         Ok(()) => 0,
@@ -257,15 +279,19 @@ pub fn sys_link(oldpath: *const u8, newpath: *const u8) -> isize {
         Ok(path) => path,
         Err(e) => return e,
     };
+    let cred = Cred::current();
     let cwd = current_cwd();
-    let target = match lookup(&cwd, &oldpath) {
+    let target = match lookup(&cwd, &oldpath, cred) {
         Ok(target) => target,
         Err(e) => return e,
     };
-    let (parent, name) = match lookup_parent(&cwd, &newpath) {
+    let (parent, name) = match lookup_parent(&cwd, &newpath, cred) {
         Ok(parent) => parent,
         Err(e) => return e,
     };
+    if let Err(e) = permission(parent.inode(), MAY_WRITE | MAY_EXEC, cred) {
+        return e;
+    }
     match parent.inode().link(&name, target.inode()) {
         Ok(()) => 0,
         Err(e) => e,
@@ -282,19 +308,26 @@ pub fn sys_rename(oldpath: *const u8, newpath: *const u8) -> isize {
         Ok(path) => path,
         Err(e) => return e,
     };
+    let cred = Cred::current();
     let cwd = current_cwd();
     // The old path must exist, and a trailing slash must name a directory.
-    if let Err(e) = lookup(&cwd, &oldpath) {
+    if let Err(e) = lookup(&cwd, &oldpath, cred) {
         return e;
     }
-    let (old_parent, old_name) = match lookup_parent(&cwd, &oldpath) {
+    let (old_parent, old_name) = match lookup_parent(&cwd, &oldpath, cred) {
         Ok(old) => old,
         Err(e) => return e,
     };
-    let (new_parent, new_name) = match lookup_parent(&cwd, &newpath) {
+    let (new_parent, new_name) = match lookup_parent(&cwd, &newpath, cred) {
         Ok(new) => new,
         Err(e) => return e,
     };
+    if let Err(e) = permission(old_parent.inode(), MAY_WRITE | MAY_EXEC, cred) {
+        return e;
+    }
+    if let Err(e) = permission(new_parent.inode(), MAY_WRITE | MAY_EXEC, cred) {
+        return e;
+    }
     match old_parent
         .inode()
         .rename(&old_name, new_parent.inode(), &new_name)
@@ -336,8 +369,9 @@ pub fn sys_stat(path: *const u8, buf: *mut u8) -> isize {
         Ok(path) => path,
         Err(e) => return e,
     };
+    let cred = Cred::current();
     let cwd = current_cwd();
-    let dentry = match lookup(&cwd, &path) {
+    let dentry = match lookup(&cwd, &path, cred) {
         Ok(dentry) => dentry,
         Err(e) => return e,
     };
@@ -351,6 +385,116 @@ pub fn sys_fstat(fd: usize, buf: *mut u8) -> isize {
     };
     match file.stat() {
         Ok(st) => write_stat(buf, &st),
+        Err(e) => e,
+    }
+}
+
+/// Change a file's permission bits; the owner or the superuser may, and the
+/// type is kept (docs/perm.md §7).
+pub fn sys_chmod(path: *const u8, mode: u32) -> isize {
+    let path = match translated_str(current_user_token(), path) {
+        Ok(path) => path,
+        Err(e) => return e,
+    };
+    let cred = Cred::current();
+    let cwd = current_cwd();
+    let dentry = match lookup(&cwd, &path, cred) {
+        Ok(dentry) => dentry,
+        Err(e) => return e,
+    };
+    let inode = dentry.inode();
+    if cred.uid != 0 && cred.uid != inode.uid() {
+        return EPERM;
+    }
+    inode.set_mode((inode.mode() & S_IFMT) | (mode & 0o7777));
+    0
+}
+
+/// Change a file's owner and group; only the superuser may, as in 0.11. A
+/// `u32::MAX` half is left unchanged, as Linux does (docs/perm.md §7).
+pub fn sys_chown(path: *const u8, uid: u32, gid: u32) -> isize {
+    let path = match translated_str(current_user_token(), path) {
+        Ok(path) => path,
+        Err(e) => return e,
+    };
+    let cred = Cred::current();
+    if cred.uid != 0 {
+        return EPERM;
+    }
+    let cwd = current_cwd();
+    let dentry = match lookup(&cwd, &path, cred) {
+        Ok(dentry) => dentry,
+        Err(e) => return e,
+    };
+    let inode = dentry.inode();
+    let uid = if uid == u32::MAX { inode.uid() } else { uid };
+    let gid = if gid == u32::MAX { inode.gid() } else { gid };
+    inode.set_owner(uid, gid);
+    0
+}
+
+/// Set the file creation mask and return the previous one.
+pub fn sys_umask(mask: u32) -> isize {
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    let old = inner.umask;
+    inner.umask = (mask & 0o777) as u16;
+    old as isize
+}
+
+/// Check whether the caller may access `path` in `mode`; a path that does not
+/// resolve is `EACCES`, which is what 0.11 answers (docs/perm.md §7).
+pub fn sys_access(path: *const u8, mode: u32) -> isize {
+    if mode & !0o7 != 0 {
+        return EINVAL;
+    }
+    let path = match translated_str(current_user_token(), path) {
+        Ok(path) => path,
+        Err(e) => return e,
+    };
+    let cred = Cred::current();
+    let cwd = current_cwd();
+    let dentry = match lookup(&cwd, &path, cred) {
+        Ok(dentry) => dentry,
+        Err(_) => return EACCES,
+    };
+    if mode == 0 {
+        return 0;
+    }
+    match permission(dentry.inode(), mode as u8, cred) {
+        Ok(()) => 0,
+        Err(e) => e,
+    }
+}
+
+/// Create a special file; the permission bits are masked by umask and the owner
+/// is the caller (docs/perm.md §7).
+pub fn sys_mknod(path: *const u8, mode: u32, dev: u32) -> isize {
+    let cred = Cred::current();
+    // 0.11 lets only the superuser make a node (docs/perm.md §6)
+    if cred.uid != 0 {
+        return EPERM;
+    }
+    let ty = mode & S_IFMT;
+    // only a regular file or a device/FIFO node comes from mknod
+    if !matches!(ty, S_IFREG | S_IFCHR | S_IFBLK | S_IFIFO) {
+        return EINVAL;
+    }
+    let path = match translated_str(current_user_token(), path) {
+        Ok(path) => path,
+        Err(e) => return e,
+    };
+    let perms = (mode & 0o7777) & !current_umask();
+    let cwd = current_cwd();
+    let (parent, name) = match lookup_parent(&cwd, &path, cred) {
+        Ok(parent) => parent,
+        Err(e) => return e,
+    };
+    if let Err(e) = permission(parent.inode(), MAY_WRITE | MAY_EXEC, cred) {
+        return e;
+    }
+    match parent.inode().create_node(&name, ty | perms, cred, dev) {
+        Ok(_) => 0,
         Err(e) => e,
     }
 }

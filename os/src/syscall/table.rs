@@ -16,11 +16,15 @@ use crate::errno::ENOSYS;
 
 const SYSCALL_GETCWD: usize = 17;
 const SYSCALL_DUP: usize = 24;
+const SYSCALL_MKNOD: usize = 33;
 const SYSCALL_MKDIR: usize = 34;
 const SYSCALL_UNLINK: usize = 35;
 const SYSCALL_LINK: usize = 37;
 const SYSCALL_RENAME: usize = 38;
+const SYSCALL_ACCESS: usize = 48;
 const SYSCALL_CHDIR: usize = 49;
+const SYSCALL_CHMOD: usize = 53;
+const SYSCALL_CHOWN: usize = 54;
 const SYSCALL_OPEN: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_PIPE: usize = 59;
@@ -34,6 +38,7 @@ const SYSCALL_EXIT: usize = 93;
 const SYSCALL_SLEEP: usize = 101;
 const SYSCALL_YIELD: usize = 124;
 const SYSCALL_KILL: usize = 129;
+const SYSCALL_UMASK: usize = 166;
 const SYSCALL_GET_TIME: usize = 169;
 const SYSCALL_GETPID: usize = 172;
 const SYSCALL_BRK: usize = 214;
@@ -69,11 +74,15 @@ pub fn dispatch(syscall_id: usize, args: [usize; 6]) -> isize {
     match syscall_id {
         SYSCALL_GETCWD => sys_getcwd(args[0] as *mut u8, args[1]),
         SYSCALL_DUP => sys_dup(args[0]),
+        SYSCALL_MKNOD => sys_mknod(args[0] as *const u8, args[1] as u32, args[2] as u32),
         SYSCALL_MKDIR => sys_mkdir(args[0] as *const u8, args[1] as u32),
         SYSCALL_UNLINK => sys_unlink(args[0] as *const u8, args[1] as u32),
         SYSCALL_LINK => sys_link(args[0] as *const u8, args[1] as *const u8),
         SYSCALL_RENAME => sys_rename(args[0] as *const u8, args[1] as *const u8),
+        SYSCALL_ACCESS => sys_access(args[0] as *const u8, args[1] as u32),
         SYSCALL_CHDIR => sys_chdir(args[0] as *const u8),
+        SYSCALL_CHMOD => sys_chmod(args[0] as *const u8, args[1] as u32),
+        SYSCALL_CHOWN => sys_chown(args[0] as *const u8, args[1] as u32, args[2] as u32),
         SYSCALL_OPEN => sys_open(args[0] as *const u8, args[1] as u32, args[2] as u32),
         SYSCALL_CLOSE => sys_close(args[0]),
         SYSCALL_PIPE => sys_pipe(args[0] as *mut usize),
@@ -87,6 +96,7 @@ pub fn dispatch(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_SLEEP => sys_sleep(args[0]),
         SYSCALL_YIELD => sys_yield(),
         SYSCALL_KILL => sys_kill(args[0], args[1] as u32),
+        SYSCALL_UMASK => sys_umask(args[0] as u32),
         SYSCALL_GET_TIME => sys_get_time(),
         SYSCALL_GETPID => sys_getpid(),
         SYSCALL_BRK => sys_brk(args[0]),

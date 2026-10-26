@@ -16,5 +16,8 @@ use block_cache::{block_cache_sync_all, get_block_cache};
 pub use block_dev::BlockDevice;
 pub use efs::EasyFileSystem;
 use layout::*;
-pub use layout::{Dirent, VfsError, NAME_LENGTH_LIMIT};
+pub use layout::{
+    makedev, Dirent, VfsError, NAME_LENGTH_LIMIT, S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFMT,
+    S_IFREG,
+};
 pub use vfs::Inode;

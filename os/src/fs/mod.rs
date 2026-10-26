@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Open files, descriptor slots and the kernel VFS (docs/vfs.md §4, §5).
+//! Open files, descriptor slots, the kernel VFS, the mount table and the
+//! permission predicate (docs/vfs.md §4, §5; docs/perm.md §2, §5).
 mod inode;
+mod mount;
+mod perm;
 mod pipe;
 mod stat;
 mod stdio;
@@ -49,9 +52,11 @@ impl FileDescriptor {
 }
 
 pub use inode::{OSInode, list_apps};
+pub use mount::root;
+pub use perm::{Cred, MAY_EXEC, MAY_WRITE, permission};
 pub use pipe::make_pipe;
-pub use stat::Stat;
+pub use stat::{S_IFBLK, S_IFCHR, S_IFIFO, S_IFMT, S_IFREG, Stat};
 pub use stdio::{Stdin, Stdout};
 pub use vfs::{
-    Dentry, Inode, OpenFlags, absolute_path, lookup, lookup_parent, open, read_all, root, stat,
+    Dentry, Inode, OpenFlags, absolute_path, lookup, lookup_parent, open, read_all, stat,
 };

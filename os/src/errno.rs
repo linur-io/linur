@@ -4,10 +4,14 @@
 //! A syscall returns the negated value: `-ENOENT` is `-2`. This is the set the
 //! current calls can produce; a new call adds its numbers here.
 
+/// Operation not permitted.
+pub const EPERM: isize = -1;
 /// No such file or directory.
 pub const ENOENT: isize = -2;
 /// No such process or thread.
 pub const ESRCH: isize = -3;
+/// No such device or address: a special file has no driver.
+pub const ENXIO: isize = -6;
 /// Argument list too long.
 pub const E2BIG: isize = -7;
 /// Executable format error.
@@ -20,6 +24,8 @@ pub const ECHILD: isize = -10;
 pub const EAGAIN: isize = -11;
 /// Out of memory: the request would exceed or overlap the user address space.
 pub const ENOMEM: isize = -12;
+/// Permission denied.
+pub const EACCES: isize = -13;
 /// Bad address: the user pointer range is not mapped, not user-accessible, or
 /// not writable where the kernel writes.
 pub const EFAULT: isize = -14;

@@ -8,7 +8,7 @@ use core::fmt::{Debug, Formatter, Result};
 /// Magic number for sanity check
 const EFS_MAGIC: u32 = 0x3b800001;
 /// The max number of direct inodes
-const INODE_DIRECT_COUNT: usize = 27;
+const INODE_DIRECT_COUNT: usize = 26;
 /// The max length of inode name
 pub const NAME_LENGTH_LIMIT: usize = 27;
 /// The max number of indirect1 inodes
@@ -22,6 +22,23 @@ const INDIRECT1_BOUND: usize = DIRECT_BOUND + INODE_INDIRECT1_COUNT;
 /// The upper bound of indirect2 inode indexs
 #[allow(unused)]
 const INDIRECT2_BOUND: usize = INDIRECT1_BOUND + INODE_INDIRECT2_COUNT;
+/// Mask of the file-type bits in a mode word
+pub const S_IFMT: u16 = 0o170000;
+/// Regular file type
+pub const S_IFREG: u16 = 0o100000;
+/// Directory type
+pub const S_IFDIR: u16 = 0o040000;
+/// Character device type
+pub const S_IFCHR: u16 = 0o020000;
+/// Block device type
+pub const S_IFBLK: u16 = 0o060000;
+/// FIFO type
+pub const S_IFIFO: u16 = 0o010000;
+
+/// Encode a device number as `(major << 8) | minor`
+pub const fn makedev(major: u32, minor: u32) -> u32 {
+    (major << 8) | minor
+}
 /// Super block of a filesystem
 #[repr(C)]
 pub struct SuperBlock {
@@ -69,14 +86,6 @@ impl SuperBlock {
         self.magic == EFS_MAGIC
     }
 }
-/// Type of a disk inode
-#[repr(u32)]
-#[derive(PartialEq)]
-pub enum DiskInodeType {
-    File,
-    Directory,
-}
-
 /// A indirect block
 type IndirectBlock = [u32; BLOCK_SZ / 4];
 /// A data block
@@ -86,38 +95,47 @@ type DataBlock = [u8; BLOCK_SZ];
 pub struct DiskInode {
     pub size: u32,
     pub nlink: u32,
+    pub mode: u16,
+    pub uid: u16,
+    pub gid: u16,
+    pub _reserved: u16,
     pub direct: [u32; INODE_DIRECT_COUNT],
     pub indirect1: u32,
     pub indirect2: u32,
-    type_: DiskInodeType,
 }
 
 // A disk inode must stay 128 bytes so that four of them fit in one block.
 const _: () = assert!(core::mem::size_of::<DiskInode>() == 128);
 
 impl DiskInode {
-    /// Initialize a disk inode, as well as all direct inodes under it
+    /// Initialize a disk inode of `mode`, owned by `uid`/`gid`
     /// indirect1 and indirect2 block are allocated only when they are needed
-    pub fn initialize(&mut self, type_: DiskInodeType) {
+    pub fn initialize(&mut self, mode: u16, uid: u16, gid: u16) {
         self.size = 0;
         // A file starts with one link; a directory also counts its own "."
-        self.nlink = if type_ == DiskInodeType::Directory {
-            2
-        } else {
-            1
-        };
+        self.nlink = if mode & S_IFMT == S_IFDIR { 2 } else { 1 };
+        self.mode = mode;
+        self.uid = uid;
+        self.gid = gid;
+        self._reserved = 0;
         self.direct.iter_mut().for_each(|v| *v = 0);
         self.indirect1 = 0;
         self.indirect2 = 0;
-        self.type_ = type_;
     }
     /// Whether this inode is a directory
     pub fn is_dir(&self) -> bool {
-        self.type_ == DiskInodeType::Directory
+        self.mode & S_IFMT == S_IFDIR
     }
-    /// Whether this inode is a file
+    /// Whether this inode is a regular file
     pub fn is_file(&self) -> bool {
-        self.type_ == DiskInodeType::File
+        self.mode & S_IFMT == S_IFREG
+    }
+    /// Device number, which only a character or block device has
+    pub fn dev(&self) -> u32 {
+        match self.mode & S_IFMT {
+            S_IFCHR | S_IFBLK => self.direct[0],
+            _ => 0,
+        }
     }
     /// Return block number correspond to size.
     pub fn data_blocks(&self) -> u32 {

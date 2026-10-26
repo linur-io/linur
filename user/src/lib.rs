@@ -22,8 +22,9 @@ mod lang_items;
 mod syscall;
 
 pub use errno::{
-    E2BIG, EAGAIN, EBADF, ECHILD, EDEADLK, EEXIST, EFAULT, EINVAL, EISDIR, ENAMETOOLONG, ENOENT,
-    ENOEXEC, ENOMEM, ENOSYS, ENOTDIR, ENOTEMPTY, ERANGE, ESPIPE, ESRCH, errno,
+    E2BIG, EACCES, EAGAIN, EBADF, ECHILD, EDEADLK, EEXIST, EFAULT, EINVAL, EISDIR, ENAMETOOLONG,
+    ENOENT, ENOEXEC, ENOMEM, ENOSYS, ENOTDIR, ENOTEMPTY, ENXIO, EPERM, ERANGE, ESPIPE, ESRCH,
+    errno,
 };
 
 extern crate alloc;
@@ -97,6 +98,15 @@ pub const SEEK_END: u32 = 2;
 /// `unlink` flag: remove a directory (the `rmdir` wrapper).
 pub const AT_REMOVEDIR: u32 = 0x200;
 
+/// `access`: the file exists.
+pub const F_OK: u32 = 0;
+/// `access`: the file is executable.
+pub const X_OK: u32 = 1;
+/// `access`: the file is writable.
+pub const W_OK: u32 = 2;
+/// `access`: the file is readable.
+pub const R_OK: u32 = 4;
+
 /// `st_mode` mask for the file type.
 pub const S_IFMT: u32 = 0o170000;
 /// `st_mode`: regular file.
@@ -105,8 +115,15 @@ pub const S_IFREG: u32 = 0o100000;
 pub const S_IFDIR: u32 = 0o040000;
 /// `st_mode`: character device.
 pub const S_IFCHR: u32 = 0o020000;
+/// `st_mode`: block device.
+pub const S_IFBLK: u32 = 0o060000;
 /// `st_mode`: FIFO (pipe).
 pub const S_IFIFO: u32 = 0o010000;
+
+/// Encode a device number as `(major << 8) | minor` (docs/perm.md §3).
+pub fn makedev(major: u32, minor: u32) -> u32 {
+    (major << 8) | minor
+}
 
 /// `d_type`: directory.
 pub const DT_DIR: u8 = 4;
@@ -185,12 +202,32 @@ pub fn chdir(path: &str) -> isize {
 pub fn mkdir(path: &str, mode: u32) -> isize {
     sys_mkdir(path, mode)
 }
+/// Create a special file; `mode` carries the type, as in `mknod(2)`.
+pub fn mknod(path: &str, mode: u32, dev: u32) -> isize {
+    sys_mknod(path, mode, dev)
+}
 /// Remove a directory; `unlinkat(path, AT_REMOVEDIR)`.
 pub fn rmdir(path: &str) -> isize {
     sys_unlink(path, AT_REMOVEDIR)
 }
 pub fn unlink(path: &str) -> isize {
     sys_unlink(path, 0)
+}
+/// Change a file's permission bits; the type is kept.
+pub fn chmod(path: &str, mode: u32) -> isize {
+    sys_chmod(path, mode)
+}
+/// Change a file's owner and group; a `u32::MAX` half is left unchanged.
+pub fn chown(path: &str, uid: u32, gid: u32) -> isize {
+    sys_chown(path, uid, gid)
+}
+/// Check access to `path` with the `F_OK`/`R_OK`/`W_OK`/`X_OK` bits.
+pub fn access(path: &str, mode: u32) -> isize {
+    sys_access(path, mode)
+}
+/// Set the file creation mask and return the previous one.
+pub fn umask(mask: u32) -> u32 {
+    sys_umask(mask) as u32
 }
 pub fn link(old: &str, new: &str) -> isize {
     sys_link(old, new)

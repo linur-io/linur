@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::config::USER_STACK_SIZE;
-use crate::errno::{E2BIG, EAGAIN, ECHILD, EINVAL, ENOEXEC, ESRCH};
-use crate::fs::{lookup, read_all};
+use crate::errno::{E2BIG, EACCES, EAGAIN, ECHILD, EINVAL, ENOEXEC, ESRCH};
+use crate::fs::{Cred, MAY_EXEC, lookup, permission, read_all};
 use crate::mm::{copy_from_user, copy_to_user, translated_str};
 use crate::task::{
     SignalFlags, current_process, current_task, current_user_token, exit_current_and_run_next,
@@ -85,10 +85,19 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     }
     // The image is resolved against the working directory, like every path.
     let cwd = current_process().inner_exclusive_access().cwd.clone();
-    let app = match lookup(&cwd, &path) {
+    let cred = Cred::current();
+    let app = match lookup(&cwd, &path, cred) {
         Ok(app) => app,
         Err(e) => return e,
     };
+    // 0.11 answers EACCES for an image that is not a regular file; a real image
+    // also has to grant execute permission (docs/perm.md §6).
+    if !app.inode().is_file() {
+        return EACCES;
+    }
+    if let Err(e) = permission(app.inode(), MAY_EXEC, cred) {
+        return e;
+    }
     let all_data = read_all(app.inode());
     let process = current_process();
     // A new image replaces the one address space, so it cannot be shared
@@ -113,10 +122,17 @@ pub fn sys_spawn(path: *const u8) -> isize {
         Err(e) => return e,
     };
     let cwd = current_process().inner_exclusive_access().cwd.clone();
-    let app = match lookup(&cwd, &path) {
+    let cred = Cred::current();
+    let app = match lookup(&cwd, &path, cred) {
         Ok(app) => app,
         Err(e) => return e,
     };
+    if !app.inode().is_file() {
+        return EACCES;
+    }
+    if let Err(e) = permission(app.inode(), MAY_EXEC, cred) {
+        return e;
+    }
     let all_data = read_all(app.inode());
     let Some(child) = current_process().spawn(all_data.as_slice()) else {
         return ENOEXEC;

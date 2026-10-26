@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Open-file objects over VFS inodes (docs/vfs.md §5, §9).
 
+use super::mount;
 use super::vfs;
 use super::{File, Inode, Stat};
 use crate::errno::{EINVAL, EISDIR, ENOTDIR};
@@ -147,7 +148,7 @@ impl File for OSInode {
 /// Print the root directory entries at boot.
 pub fn list_apps() {
     println!("/**** APPS ****");
-    let root = vfs::root();
+    let root = mount::root();
     let mut offset = 0;
     while let Some(dirent) = root.inode().dirent_at(offset) {
         if dirent.name != "." && dirent.name != ".." {

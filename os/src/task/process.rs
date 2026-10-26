@@ -29,6 +29,12 @@ pub struct ProcessControlBlockInner {
     pub children: Vec<Arc<ProcessControlBlock>>,
     pub exit_code: i32,
     pub cwd: Arc<Dentry>,
+    /// User id every permission check runs as (docs/perm.md §2).
+    pub uid: u32,
+    /// Group id every permission check runs as.
+    pub gid: u32,
+    /// Permission bits cleared from every file this process creates.
+    pub umask: u16,
     pub fd_table: Vec<Option<FileDescriptor>>,
     pub signals: SignalFlags,
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
@@ -212,6 +218,9 @@ impl ProcessControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     cwd: root(),
+                    uid: 0,
+                    gid: 0,
+                    umask: 0o022,
                     fd_table: vec![
                         // 0 -> stdin
                         Some(FileDescriptor::new(Arc::new(Stdin), false)),
@@ -265,10 +274,15 @@ impl ProcessControlBlock {
     /// caller keeps its own address space. `None` when the image does not load.
     pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Option<Arc<Self>> {
         let child = Self::try_new(elf_data)?;
-        child.inner_exclusive_access().parent = Some(Arc::downgrade(self));
-        self.inner_exclusive_access()
-            .children
-            .push(Arc::clone(&child));
+        {
+            let mut child_inner = child.inner_exclusive_access();
+            child_inner.parent = Some(Arc::downgrade(self));
+            let mut parent_inner = self.inner_exclusive_access();
+            child_inner.uid = parent_inner.uid;
+            child_inner.gid = parent_inner.gid;
+            child_inner.umask = parent_inner.umask;
+            parent_inner.children.push(Arc::clone(&child));
+        }
         Some(child)
     }
 
@@ -351,6 +365,9 @@ impl ProcessControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     cwd: Arc::clone(&parent.cwd),
+                    uid: parent.uid,
+                    gid: parent.gid,
+                    umask: parent.umask,
                     fd_table: parent.fd_table.clone(),
                     signals: SignalFlags::empty(),
                     tasks: Vec::new(),

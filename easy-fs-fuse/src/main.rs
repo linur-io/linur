@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use clap::{App, Arg};
-use easy_fs::{BlockDevice, EasyFileSystem};
+use easy_fs::{makedev, BlockDevice, EasyFileSystem, S_IFCHR};
 #[cfg(test)]
-use easy_fs::{Inode, VfsError};
+use easy_fs::{Inode, VfsError, S_IFDIR, S_IFMT, S_IFREG};
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -98,10 +98,18 @@ fn easy_fs_pack() -> std::io::Result<()> {
         let mut all_data: Vec<u8> = Vec::new();
         File::open(entry.path())?.read_to_end(&mut all_data)?;
         // create a file in easy-fs
-        let inode = root_inode.create_file(name.as_str()).unwrap();
+        let inode = root_inode.create_file(name.as_str(), 0o755, 0, 0).unwrap();
         // write data to easy-fs
         inode.write_at(0, all_data.as_slice());
     }
+    // the /dev skeleton of docs/perm.md §9
+    let dev = root_inode.create_dir("dev", 0o755, 0, 0).unwrap();
+    dev.create_node("null", S_IFCHR | 0o666, 0, 0, makedev(1, 3))
+        .unwrap();
+    dev.create_node("zero", S_IFCHR | 0o666, 0, 0, makedev(1, 5))
+        .unwrap();
+    dev.create_node("console", S_IFCHR | 0o666, 0, 0, makedev(5, 1))
+        .unwrap();
     Ok(())
 }
 
@@ -148,6 +156,11 @@ fn efs_test() -> std::io::Result<()> {
     let efs = EasyFileSystem::open(block_file.clone());
     let root_inode = Arc::new(EasyFileSystem::root_inode(&efs));
 
+    // The root is a directory owned by root, mode 0o755.
+    assert_eq!(root_inode.mode(), S_IFDIR | 0o755);
+    assert_eq!(root_inode.uid(), 0);
+    assert_eq!(root_inode.gid(), 0);
+
     // "." and ".." are real entries naming the root itself.
     assert_eq!(root_inode.nlink(), 2);
     assert_eq!(
@@ -159,16 +172,25 @@ fn efs_test() -> std::io::Result<()> {
 
     // A regular file starts with one link; names are validated.
     let greet = "Hello, world!";
-    let filea = root_inode.create_file("filea").unwrap();
+    let filea = root_inode.create_file("filea", 0o644, 0, 0).unwrap();
     assert!(filea.is_file());
     assert_eq!(filea.nlink(), 1);
-    assert_eq!(err(root_inode.create_file("filea")), VfsError::Exists);
-    assert_eq!(err(root_inode.create_file("")), VfsError::InvalidName);
     assert_eq!(
-        err(root_inode.create_file(&"x".repeat(28))),
+        err(root_inode.create_file("filea", 0o644, 0, 0)),
+        VfsError::Exists
+    );
+    assert_eq!(
+        err(root_inode.create_file("", 0o644, 0, 0)),
         VfsError::InvalidName
     );
-    assert_eq!(err(filea.create_file("child")), VfsError::NotDirectory);
+    assert_eq!(
+        err(root_inode.create_file(&"x".repeat(28), 0o644, 0, 0)),
+        VfsError::InvalidName
+    );
+    assert_eq!(
+        err(filea.create_file("child", 0o644, 0, 0)),
+        VfsError::NotDirectory
+    );
 
     // Data round-trips and truncate frees it.
     filea.write_at(0, greet.as_bytes());
@@ -184,7 +206,7 @@ fn efs_test() -> std::io::Result<()> {
     assert_eq!(filea.read_at(1024, &mut buf), 0);
 
     // A new directory names itself and its parent and bumps the parent's nlink.
-    let d1 = root_inode.create_dir("d1").unwrap();
+    let d1 = root_inode.create_dir("d1", 0o755, 0, 0).unwrap();
     assert!(d1.is_dir());
     assert_eq!(d1.nlink(), 2);
     assert_eq!(root_inode.nlink(), 3);
@@ -192,7 +214,10 @@ fn efs_test() -> std::io::Result<()> {
         dirents(&d1),
         vec![entry(".", d1.inode_id(), true), entry("..", 0, true)]
     );
-    assert_eq!(err(root_inode.create_dir("d1")), VfsError::Exists);
+    assert_eq!(
+        err(root_inode.create_dir("d1", 0o755, 0, 0)),
+        VfsError::Exists
+    );
 
     // Hard links share the inode and its data.
     root_inode.link("filea2", &filea).unwrap();
@@ -221,7 +246,10 @@ fn efs_test() -> std::io::Result<()> {
     assert!(root_inode.find("filea").is_none());
     let filea_renamed = root_inode.find("filea_renamed").unwrap();
     assert_eq!(filea_renamed.inode_id(), filea.inode_id());
-    root_inode.create_file("fileb").unwrap().write_at(0, b"old");
+    root_inode
+        .create_file("fileb", 0o644, 0, 0)
+        .unwrap()
+        .write_at(0, b"old");
     root_inode
         .rename("filea_renamed", &root_inode, "fileb")
         .unwrap();
@@ -230,9 +258,9 @@ fn efs_test() -> std::io::Result<()> {
     assert_eq!(fileb.read_at(0, &mut buf), greet.len());
 
     // Rename across directories: the data follows the inode.
-    let d2 = root_inode.create_dir("d2").unwrap();
+    let d2 = root_inode.create_dir("d2", 0o755, 0, 0).unwrap();
     assert_eq!(root_inode.nlink(), 4);
-    let moved = root_inode.create_file("moved").unwrap();
+    let moved = root_inode.create_file("moved", 0o644, 0, 0).unwrap();
     moved.write_at(0, b"data");
     root_inode.rename("moved", &d2, "moved2").unwrap();
     assert!(root_inode.find("moved").is_none());
@@ -267,10 +295,10 @@ fn efs_test() -> std::io::Result<()> {
     assert!(root_inode.find("d2").is_none());
 
     // A directory spanning several data blocks iterates and shrinks correctly.
-    let many = root_inode.create_dir("many").unwrap();
+    let many = root_inode.create_dir("many", 0o755, 0, 0).unwrap();
     const MANY: usize = 40;
     for i in 0..MANY {
-        many.create_file(&format!("f{}", i)).unwrap();
+        many.create_file(&format!("f{}", i), 0o644, 0, 0).unwrap();
     }
     let entries = dirents(&many);
     assert_eq!(entries.len(), MANY + 2);
@@ -321,6 +349,7 @@ fn efs_test() -> std::io::Result<()> {
     random_str_test(27 * BLOCK_SZ);
     random_str_test(27 * BLOCK_SZ + 1);
     random_str_test(100 * BLOCK_SZ);
+    random_str_test(154 * BLOCK_SZ);
     random_str_test(155 * BLOCK_SZ);
     random_str_test(155 * BLOCK_SZ + 1);
     random_str_test(400 * BLOCK_SZ);
@@ -328,5 +357,51 @@ fn efs_test() -> std::io::Result<()> {
     random_str_test(2000 * BLOCK_SZ);
 
     assert_eq!(root_inode.nlink(), 2);
+
+    // Metadata round-trips: mode, owner and device number of every inode kind.
+    let owned = root_inode.create_file("owned", 0o640, 7, 8).unwrap();
+    assert_eq!(owned.mode(), S_IFREG | 0o640);
+    assert_eq!((owned.uid(), owned.gid()), (7, 8));
+    assert_eq!(owned.dev(), 0);
+    let meta = root_inode.create_dir("meta", 0o750, 9, 10).unwrap();
+    assert_eq!(meta.mode(), S_IFDIR | 0o750);
+    assert_eq!((meta.uid(), meta.gid()), (9, 10));
+    let null = root_inode
+        .create_node("null", S_IFCHR | 0o666, 11, 12, makedev(1, 3))
+        .unwrap();
+    assert_eq!(null.mode(), S_IFCHR | 0o666);
+    assert_eq!((null.uid(), null.gid()), (11, 12));
+    assert_eq!(null.dev(), makedev(1, 3));
+    assert_eq!(null.nlink(), 1);
+    assert_eq!(null.size(), 0);
+    assert!(!null.is_file());
+    assert!(!null.is_dir());
+    // set_mode keeps the type and set_owner rewrites the owner.
+    owned.set_mode((owned.mode() & S_IFMT) | 0o600);
+    owned.set_owner(1, 2);
+    // A regular file's direct[0] is a data block, never read as a device number.
+    owned.write_at(0, b"data");
+    assert_eq!(owned.dev(), 0);
+    owned.truncate();
+    assert_eq!(owned.dev(), 0);
+
+    // Reopen the image: the metadata above survives.
+    let efs = EasyFileSystem::open(block_file.clone());
+    let root_inode = Arc::new(EasyFileSystem::root_inode(&efs));
+    assert_eq!(root_inode.mode(), S_IFDIR | 0o755);
+    let owned = root_inode.find("owned").unwrap();
+    assert_eq!(owned.mode(), S_IFREG | 0o600);
+    assert_eq!((owned.uid(), owned.gid()), (1, 2));
+    assert_eq!(owned.dev(), 0);
+    let meta = root_inode.find("meta").unwrap();
+    assert_eq!(meta.mode(), S_IFDIR | 0o750);
+    assert_eq!((meta.uid(), meta.gid()), (9, 10));
+    let null = root_inode.find("null").unwrap();
+    assert_eq!(null.mode(), S_IFCHR | 0o666);
+    assert_eq!((null.uid(), null.gid()), (11, 12));
+    assert_eq!(null.dev(), makedev(1, 3));
+    assert_eq!(null.nlink(), 1);
+    assert_eq!(null.size(), 0);
+
     Ok(())
 }

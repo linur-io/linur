@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Kernel VFS objects, the path walker and open (docs/vfs.md §4, §7).
+//! Kernel VFS objects, the path walker, open and the metadata (docs/vfs.md §4,
+//! §7; docs/perm.md §5, §6).
 
-use super::stat::{S_IFDIR, S_IFREG};
-use super::{OSInode, Stat};
-use crate::drivers::BLOCK_DEVICE;
-use crate::errno::{EEXIST, EINVAL, EISDIR, ENAMETOOLONG, ENOENT, ENOTDIR, ENOTEMPTY};
+use super::OSInode;
+use super::mount;
+use super::perm::{Cred, MAY_EXEC, MAY_READ, MAY_WRITE, permission};
+use super::stat::{S_IFMT, S_IFREG, Stat};
+use crate::errno::{EEXIST, EINVAL, EISDIR, ENAMETOOLONG, ENOENT, ENOTDIR, ENOTEMPTY, ENXIO};
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitflags::*;
-use easy_fs::{EasyFileSystem, VfsError};
-use lazy_static::*;
+use easy_fs::VfsError;
 
 /// Longest single path component, one easy-fs directory entry (docs/vfs.md §2).
 const NAME_MAX: usize = 27;
@@ -62,12 +63,12 @@ pub struct Dentry {
 
 impl Dentry {
     /// Bind `name` to `inode`.
-    fn new(name: String, inode: Arc<Inode>) -> Self {
+    pub(super) fn new(name: String, inode: Arc<Inode>) -> Self {
         Self { name, inode }
     }
 
     /// The final path component that named this binding.
-    // Contract API (docs/vfs.md §4); no M2.2 caller needs it yet.
+    // Contract API (docs/vfs.md §4); no caller needs it yet.
     #[allow(dead_code)]
     pub fn name(&self) -> &str {
         &self.name
@@ -86,7 +87,7 @@ pub struct Inode {
 
 impl Inode {
     /// Wrap a disk-layer inode.
-    fn new(inner: Arc<easy_fs::Inode>) -> Arc<Self> {
+    pub(super) fn new(inner: Arc<easy_fs::Inode>) -> Arc<Self> {
         Arc::new(Self { inner })
     }
 
@@ -103,6 +104,36 @@ impl Inode {
     /// Whether this inode is a regular file.
     pub fn is_file(&self) -> bool {
         self.inner.is_file()
+    }
+
+    /// The file type and permission bits.
+    pub fn mode(&self) -> u32 {
+        self.inner.mode() as u32
+    }
+
+    /// The owner.
+    pub fn uid(&self) -> u32 {
+        self.inner.uid() as u32
+    }
+
+    /// The group.
+    pub fn gid(&self) -> u32 {
+        self.inner.gid() as u32
+    }
+
+    /// The device number of a special file; 0 for every other type.
+    pub fn dev(&self) -> u32 {
+        self.inner.dev()
+    }
+
+    /// Replace the file type and permission bits.
+    pub fn set_mode(&self, mode: u32) {
+        self.inner.set_mode(mode as u16);
+    }
+
+    /// Replace the owner and the group.
+    pub fn set_owner(&self, uid: u32, gid: u32) {
+        self.inner.set_owner(uid as u16, gid as u16);
     }
 
     /// The file size in bytes.
@@ -140,18 +171,32 @@ impl Inode {
         self.inner.dirent_at(offset)
     }
 
-    /// Create a regular file in this directory.
-    pub fn create_file(&self, name: &str) -> Result<Arc<Inode>, isize> {
+    /// Create a regular file in this directory; `perms` are permission bits.
+    pub fn create_file(&self, name: &str, perms: u32, cred: Cred) -> Result<Arc<Inode>, isize> {
         self.inner
-            .create_file(name)
+            .create_file(name, perms as u16, cred.uid as u16, cred.gid as u16)
             .map(Inode::new)
             .map_err(to_errno)
     }
 
-    /// Create a directory in this directory.
-    pub fn create_dir(&self, name: &str) -> Result<Arc<Inode>, isize> {
+    /// Create a directory in this directory; `perms` are permission bits.
+    pub fn create_dir(&self, name: &str, perms: u32, cred: Cred) -> Result<Arc<Inode>, isize> {
         self.inner
-            .create_dir(name)
+            .create_dir(name, perms as u16, cred.uid as u16, cred.gid as u16)
+            .map(Inode::new)
+            .map_err(to_errno)
+    }
+
+    /// Create a special file; `mode` carries the type and the permission bits.
+    pub fn create_node(
+        &self,
+        name: &str,
+        mode: u32,
+        cred: Cred,
+        dev: u32,
+    ) -> Result<Arc<Inode>, isize> {
+        self.inner
+            .create_node(name, mode as u16, cred.uid as u16, cred.gid as u16, dev)
             .map(Inode::new)
             .map_err(to_errno)
     }
@@ -186,26 +231,6 @@ fn to_errno(err: VfsError) -> isize {
     }
 }
 
-/// The one mounted filesystem and its root directory.
-pub struct SuperBlock {
-    root: Arc<Dentry>,
-}
-
-lazy_static! {
-    static ref SUPER_BLOCK: SuperBlock = {
-        let efs = EasyFileSystem::open(BLOCK_DEVICE.clone());
-        let root = Inode::new(Arc::new(EasyFileSystem::root_inode(&efs)));
-        SuperBlock {
-            root: Arc::new(Dentry::new(String::from("/"), root)),
-        }
-    };
-}
-
-/// The filesystem root dentry.
-pub fn root() -> Arc<Dentry> {
-    SUPER_BLOCK.root.clone()
-}
-
 /// Split a path into its starting dentry and components, checking the limits.
 fn components<'a>(cwd: &Arc<Dentry>, path: &'a str) -> Result<(Arc<Dentry>, Vec<&'a str>), isize> {
     if path.is_empty() {
@@ -215,7 +240,7 @@ fn components<'a>(cwd: &Arc<Dentry>, path: &'a str) -> Result<(Arc<Dentry>, Vec<
         return Err(ENAMETOOLONG);
     }
     let start = if path.starts_with('/') {
-        root()
+        mount::root()
     } else {
         cwd.clone()
     };
@@ -226,22 +251,24 @@ fn components<'a>(cwd: &Arc<Dentry>, path: &'a str) -> Result<(Arc<Dentry>, Vec<
     Ok((start, components))
 }
 
-/// Walk `components` from `start`; each step must be a directory.
-fn walk(mut cur: Arc<Dentry>, components: &[&str]) -> Result<Arc<Dentry>, isize> {
+/// Walk `components` from `start`; every directory it descends into must grant
+/// search permission, and each step must be a directory.
+fn walk(mut cur: Arc<Dentry>, components: &[&str], cred: Cred) -> Result<Arc<Dentry>, isize> {
     for name in components {
         if !cur.inode.is_dir() {
             return Err(ENOTDIR);
         }
+        permission(&cur.inode, MAY_EXEC, cred)?;
         let inode = cur.inode.find(name).ok_or(ENOENT)?;
         cur = Arc::new(Dentry::new(String::from(*name), inode));
     }
     Ok(cur)
 }
 
-/// Resolve `path` against `cwd`; the final component must exist.
-pub fn lookup(cwd: &Arc<Dentry>, path: &str) -> Result<Arc<Dentry>, isize> {
+/// Resolve `path` against `cwd` as `cred`; the final component must exist.
+pub fn lookup(cwd: &Arc<Dentry>, path: &str, cred: Cred) -> Result<Arc<Dentry>, isize> {
     let (start, components) = components(cwd, path)?;
-    let dentry = walk(start, &components)?;
+    let dentry = walk(start, &components, cred)?;
     if path.ends_with('/') && !dentry.inode.is_dir() {
         return Err(ENOTDIR);
     }
@@ -249,27 +276,35 @@ pub fn lookup(cwd: &Arc<Dentry>, path: &str) -> Result<Arc<Dentry>, isize> {
 }
 
 /// Resolve the parent directory of `path` and the final component name.
-pub fn lookup_parent(cwd: &Arc<Dentry>, path: &str) -> Result<(Arc<Dentry>, String), isize> {
+pub fn lookup_parent(
+    cwd: &Arc<Dentry>,
+    path: &str,
+    cred: Cred,
+) -> Result<(Arc<Dentry>, String), isize> {
     let (start, components) = components(cwd, path)?;
     let Some((name, parents)) = components.split_last() else {
         return Err(ENOENT);
     };
-    Ok((walk(start, parents)?, String::from(*name)))
+    Ok((walk(start, parents, cred)?, String::from(*name)))
 }
 
 /// Open `path` with Linux flags; the returned file keeps its own offset.
+///
+/// `mode` is the permission word a file created by `O_CREAT` gets, already
+/// masked by the caller's umask (docs/perm.md §7).
 pub fn open(
     cwd: &Arc<Dentry>,
     path: &str,
     flags: OpenFlags,
-    _mode: u32,
+    mode: u32,
+    cred: Cred,
 ) -> Result<Arc<OSInode>, isize> {
     if flags.bits() & !OpenFlags::all().bits() != 0 || flags.bits() & O_ACCMODE == O_ACCMODE {
         return Err(EINVAL);
     }
     let (readable, writable) = flags.read_write();
     let append = flags.contains(OpenFlags::APPEND);
-    match lookup(cwd, path) {
+    match lookup(cwd, path, cred) {
         Ok(dentry) => {
             let inode = dentry.inode().clone();
             if inode.is_dir() {
@@ -282,12 +317,26 @@ pub fn open(
                 if flags.contains(OpenFlags::TRUNC) || writable {
                     return Err(EISDIR);
                 }
+                // the descriptor is opened read-only, for getdents
+                permission(&inode, MAY_READ, cred)?;
             } else {
                 if flags.contains(OpenFlags::CREATE) && flags.contains(OpenFlags::EXCL) {
                     return Err(EEXIST);
                 }
                 if flags.contains(OpenFlags::DIRECTORY) {
                     return Err(ENOTDIR);
+                }
+                let mut mask = 0;
+                if readable {
+                    mask |= MAY_READ;
+                }
+                if writable {
+                    mask |= MAY_WRITE;
+                }
+                permission(&inode, mask, cred)?;
+                // a special file has no driver behind it yet (M3.1, M6.2)
+                if inode.mode() & S_IFMT != S_IFREG {
+                    return Err(ENXIO);
                 }
                 if flags.contains(OpenFlags::TRUNC) {
                     inode.truncate();
@@ -300,8 +349,9 @@ pub fn open(
             if flags.contains(OpenFlags::DIRECTORY) {
                 return Err(ENOTDIR);
             }
-            let (parent, name) = lookup_parent(cwd, path)?;
-            let inode = parent.inode().create_file(&name)?;
+            let (parent, name) = lookup_parent(cwd, path, cred)?;
+            permission(parent.inode(), MAY_WRITE | MAY_EXEC, cred)?;
+            let inode = parent.inode().create_file(&name, mode, cred)?;
             Ok(Arc::new(OSInode::new(readable, writable, append, inode)))
         }
         Err(err) => Err(err),
@@ -363,18 +413,17 @@ pub fn read_all(inode: &Arc<Inode>) -> Vec<u8> {
     data
 }
 
-/// The Linux riscv64 `struct stat` of an inode.
+/// The Linux riscv64 `struct stat` of an inode (docs/perm.md §8).
 pub fn stat(inode: &Arc<Inode>) -> Stat {
     let size = inode.size();
     Stat {
-        st_dev: 1,
+        st_dev: mount::dev(),
         st_ino: inode.inode_id() as u64,
-        st_mode: if inode.is_dir() {
-            S_IFDIR | 0o777
-        } else {
-            S_IFREG | 0o666
-        },
+        st_mode: inode.mode(),
         st_nlink: inode.nlink(),
+        st_uid: inode.uid(),
+        st_gid: inode.gid(),
+        st_rdev: inode.dev() as u64,
         st_size: size as i64,
         st_blksize: 512,
         st_blocks: (size as i64 + 511) / 512,

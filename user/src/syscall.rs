@@ -5,11 +5,15 @@ use core::arch::asm;
 
 const SYSCALL_GETCWD: usize = 17;
 const SYSCALL_DUP: usize = 24;
+const SYSCALL_MKNOD: usize = 33;
 const SYSCALL_MKDIR: usize = 34;
 const SYSCALL_UNLINK: usize = 35;
 const SYSCALL_LINK: usize = 37;
 const SYSCALL_RENAME: usize = 38;
+const SYSCALL_ACCESS: usize = 48;
 const SYSCALL_CHDIR: usize = 49;
+const SYSCALL_CHMOD: usize = 53;
+const SYSCALL_CHOWN: usize = 54;
 const SYSCALL_OPEN: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_PIPE: usize = 59;
@@ -23,6 +27,7 @@ const SYSCALL_EXIT: usize = 93;
 const SYSCALL_SLEEP: usize = 101;
 const SYSCALL_YIELD: usize = 124;
 const SYSCALL_KILL: usize = 129;
+const SYSCALL_UMASK: usize = 166;
 const SYSCALL_GET_TIME: usize = 169;
 const SYSCALL_GETPID: usize = 172;
 const SYSCALL_BRK: usize = 214;
@@ -87,6 +92,13 @@ pub fn sys_mkdir(path: &str, mode: u32) -> isize {
     )
 }
 
+pub fn sys_mknod(path: &str, mode: u32, dev: u32) -> isize {
+    syscall(
+        SYSCALL_MKNOD,
+        [path.as_ptr() as usize, mode as usize, dev as usize, 0, 0, 0],
+    )
+}
+
 pub fn sys_unlink(path: &str, flags: u32) -> isize {
     syscall(
         SYSCALL_UNLINK,
@@ -110,6 +122,27 @@ pub fn sys_rename(old: &str, new: &str) -> isize {
 
 pub fn sys_chdir(path: &str) -> isize {
     syscall(SYSCALL_CHDIR, [path.as_ptr() as usize, 0, 0, 0, 0, 0])
+}
+
+pub fn sys_access(path: &str, mode: u32) -> isize {
+    syscall(
+        SYSCALL_ACCESS,
+        [path.as_ptr() as usize, mode as usize, 0, 0, 0, 0],
+    )
+}
+
+pub fn sys_chmod(path: &str, mode: u32) -> isize {
+    syscall(
+        SYSCALL_CHMOD,
+        [path.as_ptr() as usize, mode as usize, 0, 0, 0, 0],
+    )
+}
+
+pub fn sys_chown(path: &str, uid: u32, gid: u32) -> isize {
+    syscall(
+        SYSCALL_CHOWN,
+        [path.as_ptr() as usize, uid as usize, gid as usize, 0, 0, 0],
+    )
 }
 
 pub fn sys_open(path: &str, flags: u32, mode: u32) -> isize {
@@ -185,6 +218,10 @@ pub fn sys_yield() -> isize {
 
 pub fn sys_kill(pid: usize, signal: i32) -> isize {
     syscall(SYSCALL_KILL, [pid, signal as usize, 0, 0, 0, 0])
+}
+
+pub fn sys_umask(mask: u32) -> isize {
+    syscall(SYSCALL_UMASK, [mask as usize, 0, 0, 0, 0, 0])
 }
 
 pub fn sys_get_time() -> isize {

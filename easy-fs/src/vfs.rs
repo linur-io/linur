@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{
-    block_cache_sync_all, get_block_cache, BlockDevice, DirEntry, Dirent, DiskInode, DiskInodeType,
-    EasyFileSystem, VfsError, DIRENT_SZ, NAME_LENGTH_LIMIT,
+    block_cache_sync_all, get_block_cache, BlockDevice, DirEntry, Dirent, DiskInode,
+    EasyFileSystem, VfsError, DIRENT_SZ, NAME_LENGTH_LIMIT, S_IFDIR, S_IFMT, S_IFREG,
 };
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -182,6 +182,41 @@ impl Inode {
         let _fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| disk_inode.is_file())
     }
+    /// Mode word of the current inode
+    pub fn mode(&self) -> u16 {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| disk_inode.mode)
+    }
+    /// Owner uid of the current inode
+    pub fn uid(&self) -> u16 {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| disk_inode.uid)
+    }
+    /// Owner gid of the current inode
+    pub fn gid(&self) -> u16 {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| disk_inode.gid)
+    }
+    /// Device number of a character or block device inode, zero otherwise
+    pub fn dev(&self) -> u32 {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| disk_inode.dev())
+    }
+    /// Replace the mode word of the current inode
+    pub fn set_mode(&self, mode: u16) {
+        let _fs = self.fs.lock();
+        self.modify_disk_inode(|disk_inode| disk_inode.mode = mode);
+        block_cache_sync_all();
+    }
+    /// Replace the owner of the current inode
+    pub fn set_owner(&self, uid: u16, gid: u16) {
+        let _fs = self.fs.lock();
+        self.modify_disk_inode(|disk_inode| {
+            disk_inode.uid = uid;
+            disk_inode.gid = gid;
+        });
+        block_cache_sync_all();
+    }
     /// Size of the current inode in bytes
     pub fn size(&self) -> u32 {
         let _fs = self.fs.lock();
@@ -238,16 +273,46 @@ impl Inode {
             })
         })
     }
-    /// Create a regular file named `name` in the current directory
-    pub fn create_file(&self, name: &str) -> Result<Arc<Inode>, VfsError> {
-        self.create_inode(name, DiskInodeType::File)
+    /// Create a regular file named `name` with permission bits `mode`
+    pub fn create_file(
+        &self,
+        name: &str,
+        mode: u16,
+        uid: u16,
+        gid: u16,
+    ) -> Result<Arc<Inode>, VfsError> {
+        self.create_inode(name, S_IFREG | mode, uid, gid, 0)
     }
-    /// Create a directory named `name` in the current directory
-    pub fn create_dir(&self, name: &str) -> Result<Arc<Inode>, VfsError> {
-        self.create_inode(name, DiskInodeType::Directory)
+    /// Create a directory named `name` with permission bits `mode`
+    pub fn create_dir(
+        &self,
+        name: &str,
+        mode: u16,
+        uid: u16,
+        gid: u16,
+    ) -> Result<Arc<Inode>, VfsError> {
+        self.create_inode(name, S_IFDIR | mode, uid, gid, 0)
     }
-    /// Create an inode of type `type_` named `name` in the current directory
-    fn create_inode(&self, name: &str, type_: DiskInodeType) -> Result<Arc<Inode>, VfsError> {
+    /// Create a special file named `name`; `mode` carries the full type
+    pub fn create_node(
+        &self,
+        name: &str,
+        mode: u16,
+        uid: u16,
+        gid: u16,
+        dev: u32,
+    ) -> Result<Arc<Inode>, VfsError> {
+        self.create_inode(name, mode, uid, gid, dev)
+    }
+    /// Create an inode with `mode`, owned by `uid`/`gid`, in the current directory
+    fn create_inode(
+        &self,
+        name: &str,
+        mode: u16,
+        uid: u16,
+        gid: u16,
+        dev: u32,
+    ) -> Result<Arc<Inode>, VfsError> {
         if !valid_name(name) {
             return Err(VfsError::InvalidName);
         }
@@ -261,11 +326,14 @@ impl Inode {
                 Ok(())
             }
         })?;
-        let is_dir = type_ == DiskInodeType::Directory;
+        let is_dir = mode & S_IFMT == S_IFDIR;
         let parent_id = fs.get_inode_id(self.block_id as u32, self.block_offset);
         let new_inode_id = fs.alloc_inode();
         let new_pos = fs.get_disk_inode_pos(new_inode_id);
-        self.modify_inode_at(new_pos, |disk_inode| disk_inode.initialize(type_));
+        self.modify_inode_at(new_pos, |disk_inode| {
+            disk_inode.initialize(mode, uid, gid);
+            disk_inode.direct[0] = dev;
+        });
         self.modify_disk_inode(|disk_inode| {
             self.append_entry(disk_inode, name, new_inode_id, &mut fs);
             if is_dir {
