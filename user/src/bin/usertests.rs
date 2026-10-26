@@ -86,6 +86,10 @@ static SUCC_TESTS: &[(&str, &str, &str, &str, i32)] = &[
     ("stat_test\0", "\0", "\0", "\0", 0),
     ("open_flags_test\0", "\0", "\0", "\0", 0),
     ("cloexec_test\0", "\0", "\0", "\0", 0),
+    // M2.3: permissions, mounts and /dev seed suite (docs/perm.md §11)
+    ("perm_test\0", "\0", "\0", "\0", 0),
+    ("dev_test\0", "\0", "\0", "\0", 0),
+    ("mount_test\0", "\0", "\0", "\0", 0),
 ];
 
 static FAIL_TESTS: &[(&str, &str, &str, &str, i32)] = &[
