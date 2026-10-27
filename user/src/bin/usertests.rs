@@ -15,6 +15,7 @@ extern crate user_lib;
 //   ch5_exit0, ch5_exit1, ch5_getpid  spawned helpers of spawn0/spawn1 (M2.1)
 //   ch5_stride0-5                     spawned helpers of ch5_stride (M2.1)
 //   cloexec_child                     spawned helper of cloexec_test (M2.2)
+//   envp_child                        spawned helper of elf_test (M2.5)
 
 // item of TESTS : app_name(argv_0), argv_1, argv_2, argv_3, exit_code
 static SUCC_TESTS: &[(&str, &str, &str, &str, i32)] = &[
@@ -92,6 +93,8 @@ static SUCC_TESTS: &[(&str, &str, &str, &str, i32)] = &[
     ("mount_test\0", "\0", "\0", "\0", 0),
     // M2.4: the driver and the buffer cache under load (docs/block.md §10)
     ("disk_stress_test\0", "\0", "\0", "\0", 0),
+    // M2.5: ELF loader, shebang and envp (docs/elf.md §7)
+    ("elf_test\0", "\0", "\0", "\0", 0),
 ];
 
 static FAIL_TESTS: &[(&str, &str, &str, &str, i32)] = &[
