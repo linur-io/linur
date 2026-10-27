@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{
-    block_cache_sync_all, get_block_cache, Bitmap, BlockDevice, DirEntry, DiskInode, Inode,
-    SuperBlock, DIRENT_SZ, S_IFDIR,
+    get_block_cache, Bitmap, BlockDevice, DirEntry, DiskInode, Inode, SuperBlock, DIRENT_SZ,
+    S_IFDIR,
 };
+use crate::sync::SpinMutex;
 use crate::BLOCK_SZ;
 use alloc::sync::Arc;
-use spin::Mutex;
 ///An easy file system on block
 pub struct EasyFileSystem {
     ///Real device
@@ -16,6 +16,7 @@ pub struct EasyFileSystem {
     pub data_bitmap: Bitmap,
     inode_area_start_block: u32,
     data_area_start_block: u32,
+    data_area_blocks: u32,
 }
 
 type DataBlock = [u8; BLOCK_SZ];
@@ -26,7 +27,7 @@ impl EasyFileSystem {
         block_device: Arc<dyn BlockDevice>,
         total_blocks: u32,
         inode_bitmap_blocks: u32,
-    ) -> Arc<Mutex<Self>> {
+    ) -> Arc<SpinMutex<Self>> {
         // calculate block size of areas & create bitmaps
         let inode_bitmap = Bitmap::new(1, inode_bitmap_blocks as usize);
         let inode_num = inode_bitmap.maximum();
@@ -46,6 +47,7 @@ impl EasyFileSystem {
             data_bitmap,
             inode_area_start_block: 1 + inode_bitmap_blocks,
             data_area_start_block: 1 + inode_total_blocks + data_bitmap_blocks,
+            data_area_blocks,
         };
         // clear all blocks
         for i in 0..total_blocks {
@@ -86,11 +88,10 @@ impl EasyFileSystem {
                 disk_inode.write_at(0, dot.as_bytes(), &block_device);
                 disk_inode.write_at(DIRENT_SZ, dotdot.as_bytes(), &block_device);
             });
-        block_cache_sync_all();
-        Arc::new(Mutex::new(efs))
+        Arc::new(SpinMutex::new(efs))
     }
     /// Open a block device as a filesystem
-    pub fn open(block_device: Arc<dyn BlockDevice>) -> Arc<Mutex<Self>> {
+    pub fn open(block_device: Arc<dyn BlockDevice>) -> Arc<SpinMutex<Self>> {
         // read SuperBlock
         get_block_cache(0, Arc::clone(&block_device))
             .lock()
@@ -107,12 +108,13 @@ impl EasyFileSystem {
                     ),
                     inode_area_start_block: 1 + super_block.inode_bitmap_blocks,
                     data_area_start_block: 1 + inode_total_blocks + super_block.data_bitmap_blocks,
+                    data_area_blocks: super_block.data_area_blocks,
                 };
-                Arc::new(Mutex::new(efs))
+                Arc::new(SpinMutex::new(efs))
             })
     }
     /// Get the root inode of the filesystem
-    pub fn root_inode(efs: &Arc<Mutex<Self>>) -> Inode {
+    pub fn root_inode(efs: &Arc<SpinMutex<Self>>) -> Inode {
         let block_device = Arc::clone(&efs.lock().block_device);
         // acquire efs lock temporarily
         let (block_id, block_offset) = efs.lock().get_disk_inode_pos(0);
@@ -155,6 +157,12 @@ impl EasyFileSystem {
             &self.block_device,
             (block_id - self.data_area_start_block) as usize,
         )
+    }
+    /// Count the data blocks that are not allocated
+    pub fn free_data_blocks(&self) -> usize {
+        // the bits past the data area are never allocated and not free blocks
+        let outside = self.data_bitmap.maximum() - self.data_area_blocks as usize;
+        self.data_bitmap.free_bits(&self.block_device) - outside
     }
 
     /// Deallocate an inode by its id

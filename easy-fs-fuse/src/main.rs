@@ -1,20 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use clap::{App, Arg};
-use easy_fs::{makedev, BlockDevice, EasyFileSystem, S_IFCHR};
+use easy_fs::{block_cache_sync_all, makedev, BlockDevice, EasyFileSystem, S_IFCHR};
 #[cfg(test)]
 use easy_fs::{Inode, VfsError, S_IFDIR, S_IFMT, S_IFREG};
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
 const BLOCK_SZ: usize = 512;
 
+/// Device reads so far, for the host test
+#[cfg(test)]
+static READS: AtomicUsize = AtomicUsize::new(0);
+/// Device writes so far, for the host test
+#[cfg(test)]
+static WRITES: AtomicUsize = AtomicUsize::new(0);
+
 struct BlockFile(Mutex<File>);
 
 impl BlockDevice for BlockFile {
     fn read_block(&self, block_id: usize, buf: &mut [u8]) {
+        #[cfg(test)]
+        READS.fetch_add(1, Ordering::Relaxed);
         let mut file = self.0.lock().unwrap();
         file.seek(SeekFrom::Start((block_id * BLOCK_SZ) as u64))
             .expect("Error when seeking!");
@@ -22,6 +33,8 @@ impl BlockDevice for BlockFile {
     }
 
     fn write_block(&self, block_id: usize, buf: &[u8]) {
+        #[cfg(test)]
+        WRITES.fetch_add(1, Ordering::Relaxed);
         let mut file = self.0.lock().unwrap();
         file.seek(SeekFrom::Start((block_id * BLOCK_SZ) as u64))
             .expect("Error when seeking!");
@@ -110,6 +123,8 @@ fn easy_fs_pack() -> std::io::Result<()> {
         .unwrap();
     dev.create_node("console", S_IFCHR | 0o666, 0, 0, makedev(5, 1))
         .unwrap();
+    // an image that is not flushed is not an image
+    block_cache_sync_all();
     Ok(())
 }
 
@@ -123,6 +138,23 @@ fn dirents(inode: &Inode) -> Vec<(String, u32, bool)> {
         entries.push((dirent.name, dirent.inode_id, dirent.is_dir));
     }
     entries
+}
+
+/// Device read and write counts so far.
+#[cfg(test)]
+fn device_counts() -> (usize, usize) {
+    (
+        READS.load(Ordering::Relaxed),
+        WRITES.load(Ordering::Relaxed),
+    )
+}
+
+/// Read `inode` from offset zero to its end.
+#[cfg(test)]
+fn read_all(inode: &Inode) -> Vec<u8> {
+    let mut data = vec![0u8; inode.size() as usize];
+    assert_eq!(inode.read_at(0, &mut data), data.len());
+    data
 }
 
 /// One expected `dirents` triple.
@@ -386,6 +418,7 @@ fn efs_test() -> std::io::Result<()> {
     assert_eq!(owned.dev(), 0);
 
     // Reopen the image: the metadata above survives.
+    block_cache_sync_all();
     let efs = EasyFileSystem::open(block_file.clone());
     let root_inode = Arc::new(EasyFileSystem::root_inode(&efs));
     assert_eq!(root_inode.mode(), S_IFDIR | 0o755);
@@ -402,6 +435,113 @@ fn efs_test() -> std::io::Result<()> {
     assert_eq!(null.dev(), makedev(1, 3));
     assert_eq!(null.nlink(), 1);
     assert_eq!(null.size(), 0);
+
+    // M2.4 delayed write: a mutation waits in the cache for a flush, and a dirty
+    // block is read back from the cache. The file is created before the baseline
+    // so that no unrelated eviction can move the device write count.
+    let delayed = root_inode.create_file("delayed", 0o644, 0, 0).unwrap();
+    let payload = vec![0x5a; 4 * BLOCK_SZ];
+    delayed.write_at(0, &payload);
+    block_cache_sync_all();
+    let (reads_before, writes_before) = device_counts();
+    let payload2 = vec![0xa5; 4 * BLOCK_SZ];
+    delayed.write_at(0, &payload2);
+    assert_eq!(
+        device_counts(),
+        (reads_before, writes_before),
+        "a write waits for a flush"
+    );
+    assert_eq!(&read_all(&delayed), &payload2);
+    assert_eq!(
+        device_counts(),
+        (reads_before, writes_before),
+        "a dirty block reads from the cache"
+    );
+    block_cache_sync_all();
+    let (_, writes_after_sync) = device_counts();
+    assert!(
+        writes_after_sync >= writes_before + 4,
+        "the flush writes the four data blocks"
+    );
+
+    // M2.4 capacity: 150 blocks across five files, more than the cache holds,
+    // flushed and read back. 30 blocks per file cross the direct/indirect1
+    // boundary at 26.
+    const FILE_BLOCKS: usize = 30;
+    let mut contents: Vec<Vec<u8>> = Vec::new();
+    for i in 0..5 {
+        let data = vec![b'a' + i as u8; FILE_BLOCKS * BLOCK_SZ];
+        let file = root_inode
+            .create_file(&format!("cap{}", i), 0o644, 0, 0)
+            .unwrap();
+        assert_eq!(file.write_at(0, &data), data.len());
+        contents.push(data);
+    }
+    let hot_data = vec![0x77u8; 3 * BLOCK_SZ];
+    root_inode
+        .create_file("hot", 0o644, 0, 0)
+        .unwrap()
+        .write_at(0, &hot_data);
+    block_cache_sync_all();
+    // "hot" is read first, so the 150 blocks after it evict it again
+    assert_eq!(&read_all(&root_inode.find("hot").unwrap()), &hot_data);
+    for (i, data) in contents.iter().enumerate() {
+        let file = root_inode.find(&format!("cap{}", i)).unwrap();
+        assert_eq!(file.size(), data.len() as u32);
+        assert_eq!(&read_all(&file), data);
+    }
+
+    // M2.4 hash hits: the evicted file is reloaded once, then served from its bucket
+    let hot = root_inode.find("hot").unwrap();
+    let (reads_before, _) = device_counts();
+    assert_eq!(&read_all(&hot), &hot_data);
+    let (reads_miss, _) = device_counts();
+    assert!(
+        reads_miss > reads_before,
+        "the evicted file comes back from the device"
+    );
+    assert_eq!(&read_all(&hot), &hot_data);
+    assert_eq!(device_counts().0, reads_miss, "a hit touches no device");
+
+    // M2.4 reclamation: a shrinking directory returns its data blocks
+    let free_before = efs.lock().free_data_blocks();
+    let reclaim = root_inode.create_dir("reclaim", 0o755, 0, 0).unwrap();
+    for i in 0..50 {
+        reclaim
+            .create_file(&format!("f{}", i), 0o644, 0, 0)
+            .unwrap();
+    }
+    // 52 entries span four data blocks; the files themselves hold no data
+    let free_full = efs.lock().free_data_blocks();
+    assert_eq!(free_full, free_before - 4);
+    for i in 0..50 {
+        reclaim.remove(&format!("f{}", i)).unwrap();
+    }
+    // back to the single block of "." and "..", the other three are returned
+    let free_shrunk = efs.lock().free_data_blocks();
+    assert_eq!(free_shrunk, free_before - 1);
+    root_inode.remove("reclaim").unwrap();
+    let free_end = efs.lock().free_data_blocks();
+    assert_eq!(free_end, free_before);
+    println!("free data blocks: {free_before} -> {free_full} -> {free_shrunk} -> {free_end}");
+
+    // M2.4 reclamation past the indirect1 boundary: 2502 entries span 157 data
+    // blocks, 160 with the indirect1 block, the indirect2 block and its one table.
+    // 40 removals shrink the directory back under the 154 blocks of indirect1 and
+    // free three data blocks, their table and both indirect blocks.
+    let free_before_deep = efs.lock().free_data_blocks();
+    let deep = root_inode.create_dir("deep", 0o755, 0, 0).unwrap();
+    for i in 0..2500 {
+        deep.create_file(&format!("f{}", i), 0o644, 0, 0).unwrap();
+    }
+    let free_deep = efs.lock().free_data_blocks();
+    assert_eq!(free_deep, free_before_deep - 160);
+    for i in 0..40 {
+        deep.remove(&format!("f{}", i)).unwrap();
+    }
+    let free_deep_shrunk = efs.lock().free_data_blocks();
+    assert_eq!(free_deep_shrunk, free_deep + 5);
+    println!("free data blocks: {free_deep} -> {free_deep_shrunk}");
 
     Ok(())
 }

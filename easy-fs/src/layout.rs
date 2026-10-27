@@ -337,6 +337,85 @@ impl DiskInode {
         self.indirect2 = 0;
         v
     }
+    /// Shrink to `new_size` and return the blocks it no longer covers.
+    /// It is the mirror of `increase_size`: pointers it frees are cleared.
+    pub fn shrink_size(&mut self, new_size: u32, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {
+        assert!(new_size <= self.size);
+        let mut v: Vec<u32> = Vec::new();
+        let mut data_blocks = self.data_blocks() as usize;
+        let keep = Self::_data_blocks(new_size) as usize;
+        self.size = new_size;
+        // direct
+        let last = data_blocks.min(INODE_DIRECT_COUNT);
+        for block in self.direct[keep.min(last)..last].iter_mut() {
+            v.push(*block);
+            *block = 0;
+        }
+        if data_blocks <= INODE_DIRECT_COUNT {
+            return v;
+        }
+        data_blocks -= INODE_DIRECT_COUNT;
+        let keep = keep.saturating_sub(INODE_DIRECT_COUNT);
+        // indirect1 entries
+        get_block_cache(self.indirect1 as usize, Arc::clone(block_device))
+            .lock()
+            .modify(0, |indirect1: &mut IndirectBlock| {
+                let last = data_blocks.min(INODE_INDIRECT1_COUNT);
+                for block in indirect1[keep.min(last)..last].iter_mut() {
+                    v.push(*block);
+                    *block = 0;
+                }
+            });
+        if keep == 0 {
+            v.push(self.indirect1);
+            self.indirect1 = 0;
+        }
+        if data_blocks <= INODE_INDIRECT1_COUNT {
+            return v;
+        }
+        data_blocks -= INODE_INDIRECT1_COUNT;
+        let keep = keep.saturating_sub(INODE_INDIRECT1_COUNT);
+        let a0 = keep / INODE_INDIRECT1_COUNT;
+        let tables = data_blocks.div_ceil(INODE_INDIRECT1_COUNT);
+        // indirect2 entries, the indirect1 tables they name, and the blocks holding them
+        get_block_cache(self.indirect2 as usize, Arc::clone(block_device))
+            .lock()
+            .modify(0, |indirect2: &mut IndirectBlock| {
+                for (offset, table) in indirect2.iter_mut().take(tables).skip(a0).enumerate() {
+                    let used = if a0 + offset == tables - 1 {
+                        (data_blocks - 1) % INODE_INDIRECT1_COUNT + 1
+                    } else {
+                        INODE_INDIRECT1_COUNT
+                    };
+                    let from = if offset == 0 {
+                        keep % INODE_INDIRECT1_COUNT
+                    } else {
+                        0
+                    };
+                    if from >= used {
+                        continue;
+                    }
+                    get_block_cache(*table as usize, Arc::clone(block_device))
+                        .lock()
+                        .modify(0, |indirect1: &mut IndirectBlock| {
+                            for block in indirect1[from..used].iter_mut() {
+                                v.push(*block);
+                                *block = 0;
+                            }
+                        });
+                    // the table block goes only when none of its entries is kept
+                    if from == 0 {
+                        v.push(*table);
+                        *table = 0;
+                    }
+                }
+            });
+        if keep == 0 {
+            v.push(self.indirect2);
+            self.indirect2 = 0;
+        }
+        v
+    }
     /// Read data from current disk inode
     pub fn read_at(
         &self,

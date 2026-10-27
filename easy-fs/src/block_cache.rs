@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{BlockDevice, BLOCK_SZ};
+use crate::sync::SpinMutex;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -7,8 +8,11 @@ use core::alloc::Layout;
 use core::mem::ManuallyDrop;
 use core::ptr::{addr_of, addr_of_mut};
 use core::slice;
-use lazy_static::*;
-use spin::Mutex;
+
+/// The number of caches kept in memory, docs/block.md §7
+const BLOCK_CACHE_SIZE: usize = 64;
+/// The number of hash buckets the caches are queued in
+const HASH_BUCKETS: usize = 16;
 
 /// Use `ManuallyDrop` to ensure data is deallocated with an alignment of `BLOCK_SZ`
 struct CacheData(ManuallyDrop<Box<[u8; BLOCK_SZ]>>);
@@ -125,71 +129,81 @@ impl Drop for BlockCache {
         self.sync()
     }
 }
-/// Use a block cache of 16 blocks
-const BLOCK_CACHE_SIZE: usize = 16;
 
-pub struct BlockCacheManager {
-    queue: VecDeque<(usize, Arc<Mutex<BlockCache>>)>,
+/// One cache and the block id it holds
+type CacheEntry = (usize, Arc<SpinMutex<BlockCache>>);
+
+/// The caches of a device, in `HASH_BUCKETS` queues of `block_id % HASH_BUCKETS`
+struct BlockCacheManager {
+    /// The queues; the front of each is the oldest cache
+    queues: [VecDeque<CacheEntry>; HASH_BUCKETS],
 }
 
 impl BlockCacheManager {
-    pub fn new() -> Self {
+    /// A manager with every bucket empty
+    const fn new() -> Self {
         Self {
-            queue: VecDeque::new(),
+            queues: [const { VecDeque::new() }; HASH_BUCKETS],
         }
     }
 
-    pub fn get_block_cache(
+    /// Number of caches held
+    fn len(&self) -> usize {
+        self.queues.iter().map(VecDeque::len).sum()
+    }
+
+    /// Drop the oldest unpinned cache at or after bucket `start`, wrapping around
+    fn evict(&mut self, start: usize) {
+        for offset in 0..HASH_BUCKETS {
+            let bucket = (start + offset) % HASH_BUCKETS;
+            let oldest = self.queues[bucket]
+                .iter()
+                .position(|(_, cache)| Arc::strong_count(cache) == 1);
+            if let Some(index) = oldest {
+                // the last reference: dropping it writes a dirty cache back
+                self.queues[bucket].remove(index);
+                return;
+            }
+        }
+        panic!("all {} block caches are pinned", BLOCK_CACHE_SIZE);
+    }
+
+    /// Return the cache of `block_id`, loading it on a miss
+    fn get_block_cache(
         &mut self,
         block_id: usize,
         block_device: Arc<dyn BlockDevice>,
-    ) -> Arc<Mutex<BlockCache>> {
-        if let Some(pair) = self.queue.iter().find(|pair| pair.0 == block_id) {
-            Arc::clone(&pair.1)
-        } else {
-            // substitute
-            if self.queue.len() == BLOCK_CACHE_SIZE {
-                // from front to tail
-                if let Some((idx, _)) = self
-                    .queue
-                    .iter()
-                    .enumerate()
-                    .find(|(_, pair)| Arc::strong_count(&pair.1) == 1)
-                {
-                    self.queue.drain(idx..=idx);
-                } else {
-                    panic!("Run out of BlockCache!");
-                }
-            }
-            // load block into mem and push back
-            let block_cache = Arc::new(Mutex::new(BlockCache::new(
-                block_id,
-                Arc::clone(&block_device),
-            )));
-            self.queue.push_back((block_id, Arc::clone(&block_cache)));
-            block_cache
+    ) -> Arc<SpinMutex<BlockCache>> {
+        let bucket = block_id % HASH_BUCKETS;
+        if let Some((_, cache)) = self.queues[bucket].iter().find(|(id, _)| *id == block_id) {
+            return Arc::clone(cache);
         }
+        if self.len() == BLOCK_CACHE_SIZE {
+            self.evict(bucket);
+        }
+        let cache = Arc::new(SpinMutex::new(BlockCache::new(block_id, block_device)));
+        self.queues[bucket].push_back((block_id, Arc::clone(&cache)));
+        cache
     }
 }
 
-lazy_static! {
-    /// The global block cache manager
-    pub static ref BLOCK_CACHE_MANAGER: Mutex<BlockCacheManager> =
-        Mutex::new(BlockCacheManager::new());
-}
+/// The global block cache manager
+static BLOCK_CACHE_MANAGER: SpinMutex<BlockCacheManager> = SpinMutex::new(BlockCacheManager::new());
+
 /// Get the block cache corresponding to the given block id and block device
 pub fn get_block_cache(
     block_id: usize,
     block_device: Arc<dyn BlockDevice>,
-) -> Arc<Mutex<BlockCache>> {
+) -> Arc<SpinMutex<BlockCache>> {
     BLOCK_CACHE_MANAGER
         .lock()
         .get_block_cache(block_id, block_device)
 }
-/// Sync all block cache to block device
+
+/// Write every dirty cache back to the block device, docs/block.md §7
 pub fn block_cache_sync_all() {
     let manager = BLOCK_CACHE_MANAGER.lock();
-    for (_, cache) in manager.queue.iter() {
+    for (_, cache) in manager.queues.iter().flatten() {
         cache.lock().sync();
     }
 }

@@ -61,6 +61,20 @@ impl Bitmap {
                 bitmap_block[bits64_pos] -= 1u64 << inner_pos;
             });
     }
+    /// Count the zero bits of the bitmap
+    pub fn free_bits(&self, block_device: &Arc<dyn BlockDevice>) -> usize {
+        (0..self.blocks)
+            .map(|block_id| {
+                get_block_cache(block_id + self.start_block_id, Arc::clone(block_device))
+                    .lock()
+                    .read(0, |bitmap_block: &BitmapBlock| {
+                        bitmap_block
+                            .iter()
+                            .fold(0, |free, bits| free + bits.count_zeros() as usize)
+                    })
+            })
+            .sum()
+    }
     /// Get the max number of allocatable blocks
     pub fn maximum(&self) -> usize {
         self.blocks * BLOCK_BITS

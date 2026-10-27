@@ -8,11 +8,13 @@ mod block_cache;
 mod block_dev;
 mod efs;
 mod layout;
+mod sync;
 mod vfs;
 /// Use a block size of 512 bytes
 pub const BLOCK_SZ: usize = 512;
 use bitmap::Bitmap;
-use block_cache::{block_cache_sync_all, get_block_cache};
+pub use block_cache::block_cache_sync_all;
+use block_cache::get_block_cache;
 pub use block_dev::BlockDevice;
 pub use efs::EasyFileSystem;
 use layout::*;
@@ -20,4 +22,5 @@ pub use layout::{
     makedev, Dirent, VfsError, NAME_LENGTH_LIMIT, S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFMT,
     S_IFREG,
 };
+pub use sync::SpinMutex;
 pub use vfs::Inode;
