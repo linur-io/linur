@@ -22,7 +22,7 @@ jobs:
       - name: Install QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-riscv64 qemu-system-x86
+          sudo apt-get install -y clang qemu-system-riscv64 qemu-system-x86
 
       - name: Cache cargo and build artifacts
         uses: actions/cache@v4
@@ -37,6 +37,7 @@ jobs:
             easy-fs/target
             easy-fs-fuse/target
             hal/target
+            heap/target
             x86-smoke/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
@@ -49,7 +50,7 @@ jobs:
           if ! command -v cargo-deny >/dev/null; then
             cargo install cargo-deny --locked --version 0.20.2
           fi
-          for d in os user easy-fs hal x86-smoke; do (cd "$d" && cargo deny check); done
+          for d in os user easy-fs elf hal heap x86-smoke; do (cd "$d" && cargo deny check); done
 
       - name: Lint
         run: make lint

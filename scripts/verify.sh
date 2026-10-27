@@ -40,7 +40,7 @@ fi
 if make -C os kernel >"$dir/build-kernel.log" 2>&1; then
     build_kernel=pass
 fi
-if { (cd easy-fs-fuse && cargo test) && (cd elf && cargo test); } >"$dir/host-tests.log" 2>&1; then
+if { (cd easy-fs-fuse && cargo test) && (cd elf && cargo test) && (cd heap && cargo test); } >"$dir/host-tests.log" 2>&1; then
     host_tests=pass
 fi
 
