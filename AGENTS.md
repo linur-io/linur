@@ -5,6 +5,9 @@
 `linur` (LINUx + Rust) is a from-scratch Linux-0.11-class kernel in Rust, seeded from the rCore v3 tutorial code; the roadmap and specs live in `docs/spec/`.
 
 The kernel crate lives in `os/`; user programs and the user library live in `user/`.
+Two leaf modules live in their own repositories, mounted as submodules: the C frame
+allocator at `alloc/` (`docs/alloc.md`) and the filesystem crate at `fs/`
+(`docs/fs.md`). A fresh clone needs `git submodule update --init`.
 
 - `os/src/main.rs` is the kernel entry after `entry.asm`.
 - `os/src/trap/`, `os/src/task/`, `os/src/syscall/`, `os/src/mm/`, and `os/src/sync/` hold the main kernel subsystems.

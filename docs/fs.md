@@ -113,11 +113,12 @@ The push sequence, when the maintainer allows it:
 
 ```sh
 cd <linur-io/fs clone> && git push origin main v0.1.0
-# the submodule was cloned through a local rewrite, so teach it the real URL:
-git -C fs remote set-url origin https://github.com/linur-io/fs.git   # or: git submodule sync
 ```
 
-No kernel commit is needed to complete the pin.
+No kernel commit is needed to complete the pin: `.gitmodules` and the submodule's
+own `origin` both name the HTTPS URL even though the mount fetched through a local
+rewrite, so a later `git submodule update` and CI resolve it as soon as the push
+lands.
 
 ## 7. Tests
 
