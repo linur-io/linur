@@ -90,6 +90,8 @@ static SUCC_TESTS: &[(&str, &str, &str, &str, i32)] = &[
     ("perm_test\0", "\0", "\0", "\0", 0),
     ("dev_test\0", "\0", "\0", "\0", 0),
     ("mount_test\0", "\0", "\0", "\0", 0),
+    // M2.4: the driver and the buffer cache under load (docs/block.md §10)
+    ("disk_stress_test\0", "\0", "\0", "\0", 0),
 ];
 
 static FAIL_TESTS: &[(&str, &str, &str, &str, i32)] = &[
