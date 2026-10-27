@@ -52,7 +52,8 @@ same position: dependency-free Tier-0 crates of ours.
 | bootloader/rustsbi-qemu.bin | RustSBI 0.3.1, 32 KiB | S-mode firmware the kernel boots under — **Tier-0 violation**; a vendored binary, not a crate, so it has no `deny.toml` entry | Tier 2 | Fuxi | M5.5 |
 
 **Checks.** `cargo deny check licenses bans sources advisories` is green for `os`,
-`user`, `easy-fs`, `elf`, `hal`, `heap` and `x86-smoke` with cargo-deny 0.20.2. The
+`user`, `easy-fs`, `elf`, `hal`, `heap` and `x86-smoke` with cargo-deny 0.20.2 (the
+filesystem crate's manifest has lived in the `fs` submodule since M2.7). The
 graph now carries no advisory at all: M2.4 removed `virtio-drivers`, `volatile` and
 `log`; M2.5 removed `xmas-elf` and its `zero` bound together with the
 RUSTSEC-2025-0018 ignore the first of them carried; and M2.6 removed
@@ -62,7 +63,8 @@ RUSTSEC-2025-0018 ignore the first of them carried; and M2.6 removed
 ## Host-only tooling
 
 `easy-fs-fuse` is a host binary that packs `fs.img` and never runs inside an image. Its
-`clap` 2.34.0 and `rand` 0.8.6 closure (libc, getrandom, rand_chacha, ppv-lite86,
-zerocopy, ansi_term, atty, textwrap, winapi, cfg-if, …) is therefore outside the D7
-claim and is not a row in this ledger. `deny.toml`'s allow list targets `os`, `user` and
-`easy-fs` for the same reason.
+`clap` 2.34.0 closure (libc, ansi_term, atty, textwrap, winapi, cfg-if, …) is therefore
+outside the D7 claim and is not a row in this ledger; M2.7 dropped `rand` and its
+getrandom/rand_chacha/ppv-lite86/zerocopy tail when the filesystem host test moved into
+the `fs` submodule. `deny.toml`'s allow list targets the kernel-image graphs for the
+same reason.

@@ -99,7 +99,7 @@ Disk inode, still exactly 128 bytes, four per 512-byte block:
 
 ## 4. easy-fs API
 
-`easy-fs/src/vfs.rs` and `easy-fs/src/layout.rs`:
+`fs/src/vfs.rs` and `fs/src/layout.rs`:
 
 ```rust
 impl Inode {

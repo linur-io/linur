@@ -12,8 +12,8 @@ the directory-block leak M2.2 documented.
 In: the own virtio-blk driver over the legacy virtio-MMIO interface; its split
 virtqueue (descriptor table, available and used rings, a descriptor free list) and
 its request control block; DMA memory in the kernel image instead of page frames;
-the kernel's own spinlock (`os/src/sync/spinlock.rs`) and easy-fs's own spinlock
-(`easy-fs/src/sync.rs`); a buffer cache with hash queues, an eviction policy that
+the kernel's own spinlock (`os/src/sync/spinlock.rs`) and the filesystem crate's own
+spinlock (`fs/src/sync.rs`); a buffer cache with hash queues, an eviction policy that
 skips pinned caches, and delayed write; `block_cache_sync_all()` as the flush the
 future `sync` call will use; directory data-block reclamation on removal.
 
@@ -116,7 +116,7 @@ into the driver.
 Two small spinlocks replace `spin` in our own code:
 
 ```rust
-// os/src/sync/spinlock.rs and easy-fs/src/sync.rs, same shape
+// os/src/sync/spinlock.rs and fs/src/sync.rs, same shape
 pub struct SpinMutex<T> { locked: AtomicBool, data: UnsafeCell<T> }
 impl<T> SpinMutex<T> {
     pub const fn new(data: T) -> Self;
@@ -131,7 +131,7 @@ impl<T> SpinMutex<T> {
 * easy-fs cannot depend on the kernel, so it carries the same lock for the cache
   manager, each cache and `EasyFileSystem`; the two implementations are
   deliberately separate and documented as such.
-* `spin` leaves the manifests we control: `easy-fs/Cargo.toml` drops it, and
+* `spin` leaves the manifests we control: `fs/Cargo.toml` drops it, and
   `os` never listed it. The kernel graph keeps `spin 0.7.2` only inside
   `buddy_system_allocator` (retired at M2.6) and `spin 0.9.9` inside
   `lazy_static`; `DEPENDENCIES.md` and `deny.toml` are updated to say exactly that.
@@ -139,7 +139,7 @@ impl<T> SpinMutex<T> {
 
 ## 7. The buffer cache
 
-`easy-fs/src/block_cache.rs`, rewritten:
+`fs/src/block_cache.rs`, rewritten:
 
 * **Hash queues.** `BLOCK_CACHE_SIZE` = 64 caches in `HASH_BUCKETS` = 16 buckets,
   `bucket = block_id % HASH_BUCKETS`. A hit is a search of that bucket only.
@@ -180,9 +180,9 @@ boundary and shrinks again leaks a block. M2.4 fixes it:
 
 ## 9. Host tests
 
-`easy-fs-fuse`'s single `efs_test` (see `notes/m23.md` pitfall 4: the block cache
-is process-global, so one test owns it) grows these cases. `BlockFile` counts
-device reads and writes under `#[cfg(test)]`.
+`fs/host/tests/efs.rs`'s single `efs_test` (moved out of `easy-fs-fuse` at M2.7; see
+`notes/m23.md` pitfall 4: the block cache is process-global, so one test owns it)
+grows these cases. The host adapter's `BlockFile` counts device reads and writes.
 
 * **Delayed write:** create and size the file *before* the baseline, then
   overwrite the same resident blocks; the device read and write counts do not

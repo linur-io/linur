@@ -22,9 +22,9 @@
 # before `make verify`; the local `make lint` covers fmt and clippy only, so
 # cargo-deny stays a CI prerequisite (it needs the advisory database). There is no
 # Cargo workspace yet (the split is M5.2), so the check runs once per manifest: os,
-# user, easy-fs, elf, hal, x86-smoke and heap. easy-fs-fuse is host-only tooling
-# outside the D7 claim and is deliberately not a target — its clap/rand closure is not
-# ledgered here.
+# user, fs, elf, hal, x86-smoke and heap. The filesystem crate's manifest lives in the
+# fs/ submodule since M2.7; easy-fs-fuse is host-only tooling outside the D7 claim and
+# is deliberately not a target — its clap closure is not ledgered here.
 #
 # Checked with cargo-deny 0.20.2 on those seven manifests: licenses, bans, sources and
 # advisories all pass. The advisory database was cloned into a writable CARGO_HOME

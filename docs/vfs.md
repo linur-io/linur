@@ -64,7 +64,7 @@ moved into `mode` (`docs/perm.md` §3).
 
 ## 3. easy-fs API (the disk layer)
 
-`easy-fs/src/vfs.rs` exposes these; the crate stays `no_std`, dependency-free of
+`fs/src/vfs.rs` (the crate's repository, mounted at `fs/`) exposes these; the crate stays `no_std`, dependency-free of
 kernel errno, and returns its own error enum so the kernel owns the errno policy:
 
 ```rust

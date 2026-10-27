@@ -27,7 +27,7 @@ target (`rustup target add x86_64-unknown-none`, for the compile-only check and
 the smoke path), `clang` (the C frame allocator in `alloc/` is compiled by
 `os/build.rs`; an unversioned or versioned `clang` is found automatically),
 `qemu-system-riscv64` >= 7, and `qemu-system-x86_64` for the smoke path. A fresh
-clone needs `git submodule update --init` for `alloc/`.
+clone needs `git submodule update --init` for `alloc/` and `fs/`.
 
 ```sh
 cd os && make run
