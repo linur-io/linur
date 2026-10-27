@@ -18,4 +18,4 @@ pub const MIN_PRIORITY: isize = 2;
 /// User virtual address where the `brk` heap starts.
 pub const USER_HEAP_BASE: usize = 0x4000_0000;
 
-pub use crate::board::{CLOCK_FREQ, MEMORY_END, MMIO};
+pub use crate::board::{CLOCK_FREQ, MEMORY_END, MEMORY_START, MMIO};

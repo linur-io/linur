@@ -46,6 +46,7 @@ preflight:
 	if [ ! -d "$(SYSROOT)/lib/rustlib/$(TARGET)/lib" ]; then missing="$$missing\n  rustup target add $(TARGET)"; fi; \
 	if [ ! -d "$(SYSROOT)/lib/rustlib/src/rust/library" ]; then missing="$$missing\n  rustup component add rust-src"; fi; \
 	if [ ! -x "$(LLVM_BIN)/llvm-objcopy" ] || [ ! -x "$(LLVM_BIN)/llvm-objdump" ]; then missing="$$missing\n  rustup component add llvm-tools-preview"; fi; \
+	if ! command -v clang >/dev/null 2>&1 && ! command -v clang-19 >/dev/null 2>&1 && ! command -v clang-20 >/dev/null 2>&1 && ! command -v clang-21 >/dev/null 2>&1 && ! command -v clang-22 >/dev/null 2>&1; then missing="$$missing\n  install clang (build.rs compiles alloc/ with it, docs/alloc.md 5)"; fi; \
 	if [ -n "$$missing" ]; then \
 		printf 'error: Rust toolchain is missing pieces (make never downloads anything):%b\n' "$$missing" >&2; \
 		echo "run the commands above once, then re-run make." >&2; \

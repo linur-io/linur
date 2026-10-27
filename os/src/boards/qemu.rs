@@ -2,6 +2,8 @@
 use hal::Exit;
 
 pub const CLOCK_FREQ: usize = 12500000;
+/// Start of the board's RAM (the frame map is sized from here, docs/alloc.md §4).
+pub const MEMORY_START: usize = 0x8000_0000;
 pub const MEMORY_END: usize = 0x8800_0000;
 
 pub const MMIO: &[(usize, usize)] = &[
