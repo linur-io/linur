@@ -10,8 +10,8 @@ publish = false
 
 [dependencies]
 clap = "2.33.3"
-easy-fs = { path = "../easy-fs" }
-rand = "0.8.0"
+easy-fs = { path = "../fs" }
+easy-fs-host = { path = "../fs/host" }
 
 # [features]
 # board_qemu = []
