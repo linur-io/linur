@@ -24,8 +24,10 @@ to M6 (0.11 parity, v1.0).
 Prerequisites: the pinned Rust toolchain from
 [rust-toolchain.toml](rust-toolchain.toml) with the `x86_64-unknown-none`
 target (`rustup target add x86_64-unknown-none`, for the compile-only check and
-the smoke path), `qemu-system-riscv64` >= 7, and `qemu-system-x86_64` for the
-smoke path.
+the smoke path), `clang` (the C frame allocator in `alloc/` is compiled by
+`os/build.rs`; an unversioned or versioned `clang` is found automatically),
+`qemu-system-riscv64` >= 7, and `qemu-system-x86_64` for the smoke path. A fresh
+clone needs `git submodule update --init` for `alloc/`.
 
 ```sh
 cd os && make run

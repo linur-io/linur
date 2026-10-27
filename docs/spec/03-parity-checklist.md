@@ -31,7 +31,7 @@ Every row must end as exactly one of:
 
 | item | Linux 0.11 | linur target | status |
 |---|---|---|---|
-| frame allocator | `mem_map[]` byte array, backwards scan | own allocator, written in C (D8) | TODO M2.6 |
+| frame allocator | `mem_map[]` byte array, backwards scan | own allocator, written in C (D8) | DONE M2.6 (own refcount byte map in C, backwards scan, 32 KiB over the board RAM window — `linur-io/alloc` @ v0.1.0, `docs/alloc.md`; the kernel and user heaps are our own Rust free list; `make verify` 77/77) |
 | address translation | segmentation + paging, LDT per task, 64 MiB window | page-table VM per arch | DELTA F3 |
 | copy-on-write | `copy_page_tables` clears the write bit; `un_wp_page` | COW `fork` | TODO M4.1 |
 | demand paging | `do_no_page`, page from the executable | demand paging + page cache | TODO M4.2 |

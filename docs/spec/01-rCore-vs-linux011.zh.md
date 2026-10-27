@@ -34,7 +34,7 @@
 |---|---|---|---|
 | **启动链** | `bootsect.s` 恰好 512 B → `setup.s` ≤ 4 个扇区（实模式、INT 15h 取内存大小、把镜像搬到 0x00000、临时 GDT/IDT、CR0.PE）→ 0x0000 处的 `head.s`（A20 检查、287/387 检测、pg_dir + 4 个页表 = 16 MiB 恒等映射，随后跳到 `main`）。构建时系统 ≤ 128 KiB。 | 从**随仓库携带的二进制** `bootloader/rustsbi-qemu.bin` 进入 S 模式（RustSBI 0.3.1，在别人的 WSL 机器上构建）；内核由 QEMU `-device loader` 加载到 0x80200000；`entry.asm` 设置一个栈并跳到 Rust。 | 自建 x86_64 启动链（multiboot2 或自己的 loader + 长模式设置）；riscv64 则在 CI 里构建 RustSBI，或者自己写一个 M 模式垫片。 |
 | **架构抽象** | 不适用（只有 i386） | 一个硬编码的板级配置文件 `boards/qemu.rs`（CLOCK_FREQ 12.5 MHz、MEMORY_END 0x8800_0000、MMIO 列表），通过 `#[path]` 接进来；整个仓库里 `cfg(feature)` 命中 0 次 | HAL 接缝 + 按架构划分的 crate；真正的 trait 设计留到第二个移植目标（port #2） |
-| **物理内存** | `mem_map[]` 字节数组覆盖 1–16 MiB；`get_free_page` **从后往前**扫描，并清零；`PAGING_PAGES` 为 3840 | 作用于 `[ekernel, 0x8800_0000)` 的栈式分配器（bump + LIFO 回收，不做合并）；每个页帧都清零；内核堆是 2 MiB 静态数组里的 `buddy_system_allocator`（Tier-0 违规） | 自建分配器 —— 按 D8 用 **C** 写 |
+| **物理内存** | `mem_map[]` 字节数组覆盖 1–16 MiB；`get_free_page` **从后往前**扫描，并清零；`PAGING_PAGES` 为 3840 | **用 C 写的** refcount 字节图（`linur-io/alloc`，D8）覆盖 `[ekernel, 0x8800_0000)`，板级 128 MiB 的 RAM 窗口只占 32 KiB；**反向**扫描，每个页帧仍在 Rust 侧清零；内核堆与用户堆 = 自建 Rust free list | M2.6 已完成；COW 共享在 M4.1 补上 refcount 调用 |
 | **虚拟内存** | 分段 + 分页：GDT/LDT，64 个任务 × 64 MiB 窗口，总计 4 GiB；内核恒等映射；`copy_page_tables` 清掉写位（**写时复制（COW）**），`un_wp_page`/`do_wp_page`/`write_verify`，`do_no_page`（**按需分页**），`share_page`/`try_to_share`（可执行页共享）。**从来没有 swap，也从来没有 mmap。** | `SV39`，3 级，硬编码；即时映射（每个页帧在建立映射时就分配）；fork = 完整复制，**没有 COW**；没有按需分页，没有栈增长（固定 8 KiB），没有共享内存，HEAD 里没有 `mmap`/`brk`（它们曾在 `7709ba3` 中存在，被 ch5 删掉） | COW fork、按需分页、`brk`/`mmap`、栈增长 |
 | **进程模型** | `NR_TASKS` 为 64，`task[]` 数组，`find_empty_process`；TSS 硬件任务切换；5 种状态；`copy_process` + `copy_mem`；会话/进程组/`leader`/`kill_session`；控制终端；`utime`/`stime`/`cutime`/`cstime` | PCB（地址空间、fd、信号）+ TCB（上下文、内核栈）分离 —— 线程在这里存在，0.11 **没有**；fork 断言 `thread_count()==1`；FIFO 轮转，100 Hz tick；僵尸进程 + 重新挂到 INITPROC 上；没有会话/pgrp/tty；没有时间记账 | 不做 rlimit，但要来真的：会话、pgrp、tty 归属、记账 |
 | **信号** | 定义了 1–22，`_NSIG` 为 32；位掩码 + `blocked`；SIGKILL/SIGSTOP 不可屏蔽；`signal`/`sigaction`；在返回用户态的路径上投递时会在用户栈上构造一个栈帧，基于 restorer（**没有 `sigreturn` 系统调用**）；默认动作 = `do_exit(1<<(signr-1))` | 一共 5 个位：SIGINT/SIGILL/SIGABRT/SIGFPE/SIGSEGV，**没有处理函数**，没有掩码，没有 pending 集合，没有 SIGKILL/SIGTERM/SIGCHLD/SIGSTOP；`kill(pid, 9)` 失败，因为第 9 位没有定义 | 处理函数 + 掩码 + 正确的编号；`sigsuspend` 一类阻塞 |
@@ -98,7 +98,7 @@
 6. **`read(0, buf, n>1)` 会 panic**（`fs/stdio.rs` 里的 `assert_eq!(user_buf.len(), 1)`）。
 7. **向已被放弃的管道写入会永久阻塞**（不跟踪读端，没有 EPIPE/SIGPIPE）。
 8. **`fork`/`exec` 断言只有一个线程**，所以多线程进程无法 fork。
-9. **Tier-0 依赖违规**：`buddy_system_allocator`（内核堆）、`sbi-rt`，外加随仓库携带的 RustSBI 二进制。钉在某个 git rev 上的 `virtio-drivers` 与 `xmas-elf`（ELF 解析）曾在列，M2.4 和 M2.5 分别用自己的块驱动与 ELF 解析器替换了它们。
+9. **Tier-0 依赖违规**：`sbi-rt`，外加随仓库携带的 RustSBI 二进制。钉在某个 git rev 上的 `virtio-drivers`、`xmas-elf`（ELF 解析）与 `buddy_system_allocator`（两个堆）曾在列，M2.4、M2.5 和 M2.6 分别用自己的块驱动、ELF 解析器，以及自建的帧分配器与堆替换了它们。
 10. **实验特性已经从 HEAD 中消失**：`mmap`/`munmap`/`sbrk`（`7709ba3`）、`sys_trace`（`851e377`）、`spawn`（`c505a09`）、stride + `setprio`（`2a242b5`）、`link`/`unlink`/`fstat`（`c82eb2d`）。它们可以作为参考 diff 找回（约 1,500 行，含各自的测试程序，这些程序值得留作测试）。
 
 ## 7. linur 领先 0.11 的地方
