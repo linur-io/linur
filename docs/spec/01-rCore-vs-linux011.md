@@ -54,7 +54,7 @@ So the project is not "add the missing features". It is: **build the missing hal
 | **Config** | `Makefile` + `config.h` (`RAMDISK` commented out; keyboard layout KBD_FINNISH vs KBD_US/GR/FR) | hard-coded `const`s in `config.rs`; no features, no Kconfig, no build-time config | `config/<board>.toml` → generated consts (D6) |
 | **Tests / CI** | none in tree (lab courses bolt on `testlab2.c` etc.) | no CI, no `test` target, one host test (`easy-fs-fuse::efs_test`, passing); `make run TEST=1` is interactive yet **does** return QEMU exit 0 / 255 (measured); 16 of 55 apps never exercised; `usertests` passes only by accident (a missing app counts as an expected failure) | `make verify` gate + real matrix |
 | **Userland / libc** | no userland shipped; `lib/` mini-libc; programs are a.out ZMAGIC with `N_TXTOFF == 1024`, static, no shared libs; `init` execs `/etc/rc` then `/bin/sh` | bespoke `user_lib` (no errno, no environ, no stdio buffering); 55 test programs including a shell with `<`, `>`, `|` and no builtins; apps are RISC-V ELFs packed into `fs.img` | own libc + shell + coreutils; ELF (already ELF) |
-| **ELF / exec** | a.out **ZMAGIC only**, `#!` scripts supported, argv/envp on MAX_ARG_PAGES | ELF `PT_LOAD` with U/R/W/X, no `envp`, no PIE/ASLR, no `CLOEXEC` | full `execve` with envp, shebang, `CLOEXEC` |
+| **ELF / exec** | a.out **ZMAGIC only**, `#!` scripts supported, argv/envp on MAX_ARG_PAGES | own ELF64 parser (`elf/`) behind `MemorySet::from_elf`: `PT_LOAD` with U/R/W/X, `envp`, `#!` scripts and per-descriptor `CLOEXEC`; no PIE/ASLR/`PT_INTERP` | F2/F9 only: no a.out or MINIX images (L3); PIE/`PT_INTERP` stay out of scope |
 
 ## 4. Syscall coverage
 
@@ -97,7 +97,7 @@ These are choices, not gaps — each one must stay listed so the claim stays hon
 6. **`read(0, buf, n>1)` panics** (`assert_eq!(user_buf.len(), 1)` in `fs/stdio.rs`).
 7. **Pipe writers to an abandoned pipe block forever** (no read-end tracking, no EPIPE/SIGPIPE).
 8. **`fork`/`exec` assert a single thread**, so a multi-threaded process cannot fork.
-9. **Tier-0 dependency violations**: `xmas-elf` (ELF parsing), `buddy_system_allocator` (kernel heap), `sbi-rt`, plus the vendored RustSBI binary. `virtio-drivers` (pinned to a git rev) was one until M2.4 replaced it with our own block driver.
+9. **Tier-0 dependency violations**: `buddy_system_allocator` (kernel heap), `sbi-rt`, plus the vendored RustSBI binary. `virtio-drivers` (pinned to a git rev) and `xmas-elf` (ELF parsing) were on this list until M2.4 and M2.5 replaced them with our own block driver and ELF parser.
 10. **The lab features are gone from HEAD**: `mmap`/`munmap`/`sbrk` (`7709ba3`), `sys_trace` (`851e377`), `spawn` (`c505a09`), stride + `setprio` (`2a242b5`), `link`/`unlink`/`fstat` (`c82eb2d`). They are recoverable as reference diffs (~1,500 lines including their test programs, which are worth keeping as tests).
 
 ## 7. Where linur is ahead of 0.11

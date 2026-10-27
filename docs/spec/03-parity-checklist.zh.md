@@ -48,7 +48,7 @@
 | 进程表 | `task[]` 数组，下标 0 是空闲任务 | 用户可见行为相同 | TODO M3.5（随会话/进程组齐备） |
 | 状态 | RUNNING / INTERRUPTIBLE / UNINTERRUPTIBLE / ZOMBIE / STOPPED | 同样的五种状态 | WIP M1.3 → DONE M1.3 |
 | `fork` | COW，子进程返回 0 | 相同，采用 COW | TODO M4.1 |
-| `execve` | 仅 a.out ZMAGIC，支持 shebang，argv/envp | ELF、shebang、`envp` | DELTA F2 |
+| `execve` | 仅 a.out ZMAGIC，支持 shebang，argv/envp | ELF、shebang、`envp` | DELTA F2（自 M2.5 起自建解析器：`envp`、`#!` 脚本，没有 PIE/ASLR/`PT_INTERP` —— `docs/elf.md` §2–§5） |
 | `exit` / `waitpid` | 重新挂到 init 之下，选项 WNOHANG/WUNTRACED，cutime/cstime | 语义相同，默认阻塞 | WIP M1.3 → DONE M6.1 |
 | 会话与进程组 | `pgrp`、`session`、`leader`、`setsid`、控制 tty | 相同 | TODO M3.5 |
 | 记账 | utime / stime / cutime / cstime | 相同 | TODO M3.5 |
@@ -126,7 +126,7 @@
 | 8 | `creat` | DONE（M2.2：`open` 配 `O_CREAT`、`O_WRONLY`、`O_TRUNC` 的 libc 包装；与 Linux 一样没有独立编号） |
 | 9 | `link` | DONE（M2.2：硬链接，磁盘上带 `nlink`） |
 | 10 | `unlink` | DONE（M2.2；`rmdir` 即 `AT_REMOVEDIR` 0x200） |
-| 11 | `execve` | WIP M1.3 → DONE M2.5（envp 与 shebang；errno 已在 M1.3 完成） |
+| 11 | `execve` | DONE（M2.5：`envp`、`#!` 脚本与自建 ELF 解析器；errno 已在 M1.3 完成 —— `docs/elf.md` §2–§5） |
 | 12 | `chdir` | DONE（M2.2：每进程 cwd） |
 | 13 | `time` | WIP M1.3 → DONE M3.5：目前返回单调毫秒；必须返回墙上时钟的秒数 |
 | 14 | `mknod` | DONE（M2.3：`S_IFREG`/`S_IFCHR`/`S_IFBLK`/`S_IFIFO`；裸权限字或 `S_IFDIR` 为 `EINVAL`；umask 掩码权限位 —— `docs/perm.md` §7） |
@@ -184,7 +184,7 @@ linur 有而 0.11 没有的调用：`getcwd` 17、`rename` 38（0.11 的编号 3
 | libc | 内核树之外的一个小型静态 libc | 我们自己的 libc，位于 `user/` | WIP M3.3 → DONE M3.3 |
 | shell | 由 `init` exec 的 `/bin/sh`（rc） | 我们自己的 shell | TODO M3.3 |
 | coreutils | 取决于发行版（ls, cat, cp, rm, mkdir, mount, ps…） | 一个小集合：ls、cat、cd、mkdir、rm、ln、ps、echo | TODO M3.3 |
-| 可执行文件格式 | a.out ZMAGIC，仅静态 | ELF，仅静态 | DELTA F2 |
+| 可执行文件格式 | a.out ZMAGIC，仅静态 | ELF，仅静态 | DELTA F2（自 M2.5 起自建 `elf/` 解析器；没有 PIE、动态链接或 `PT_INTERP`） |
 | 共享库 | 无 | v1.0 不提供 | DEFER |
 | init | 先跑 `/etc/rc`，再跑 `/bin/sh` | 相同的形态 | TODO M3.3 |
 
@@ -193,7 +193,7 @@ linur 有而 0.11 没有的调用：`getcwd` 17、`rename` 38（0.11 的编号 3
 | 条目 | Linux 0.11 | linur 目标 | 状态 |
 |---|---|---|---|
 | 配置 | Makefile 加 `config.h` | `config/<board>.toml` → 生成的常量 | DELTA F8, TODO M5.1 |
-| 测试套件 | 源码树里没有 | `make verify` + 宿主机测试 + 用户态套件 | DONE（M2.1 新增 13 项实验回归测试；M2.2 新增 8 个 VFS 程序；M2.3 新增 `perm_test`、`dev_test` 与 `mount_test`；M2.4 新增 `disk_stress_test`，共 76 项，另有四组宿主机测试用例（延迟写、缓存命中、超过 64 块的容量、块回收）—— `verify/report.txt`） |
+| 测试套件 | 源码树里没有 | `make verify` + 宿主机测试 + 用户态套件 | DONE（M2.1 新增 13 项实验回归测试；M2.2 新增 8 个 VFS 程序；M2.3 新增 `perm_test`、`dev_test` 与 `mount_test`；M2.4 新增 `disk_stress_test`，共 76 项，另有四组宿主机测试用例（延迟写、缓存命中、超过 64 块的容量、块回收）；M2.5 新增 `elf_test`，共 77 项，另有 `elf` crate 的 18 个宿主机测试用例 —— `verify/report.txt`） |
 | CI | 无 | 每个里程碑门禁，两种架构 | WIP M1.4 → DONE M5.4（自 M1.5 起按架构的能力矩阵：riscv64 完整套件、x86_64 冒烟路径（`docs/x86_64-smoke.md`）、x86_64 仅编译检查 —— `verify/report.json`；x86_64 的完整套件在 M5.4） |
 | 对齐证据 | — | 本文件，在每个门禁处更新 | WIP → DONE M6.4 |
 

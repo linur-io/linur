@@ -1,7 +1,7 @@
 # linur — the own ELF loader (M2.5)
 
 Status: interface contract for M2.5. Read with `spec/02` (M2.5), `spec/01` §3/§5
-(F2), `spec/03` §4/§9, `docs/vfs.md` (exec) and `docs/perm.md` (the EACCES rule
+(F2), `spec/03` §3/§8/§9, `docs/vfs.md` (exec) and `docs/perm.md` (the EACCES rule
 for a non-regular image). M2.5 replaces `xmas-elf` with an own parser, adds
 `#!` scripts and `envp`, and makes every malformed image fail with `ENOEXEC`.
 
@@ -39,7 +39,7 @@ pub enum ElfError {
     NotElf,               // no 0x7f ELF magic
     UnsupportedClass,     // EI_CLASS != 2 (ELF64)
     UnsupportedEncoding,  // EI_DATA != 1 (little endian)
-    Truncated,            // shorter than a structure it points at
+    Truncated,            // shorter than the 64-byte ELF header
     BadHeader,            // e_version, e_ehsize, e_phentsize, e_phoff ...
     BadProgramHeaders,    // the phdr table lies outside the image
     BadSegment,           // filesz > memsz, offset+filesz > len, address overflow
@@ -73,6 +73,8 @@ impl<'a> Elf<'a> {
     pub fn kind(&self) -> u16;
     /// e_entry, the first instruction executed.
     pub fn entry(&self) -> usize;
+    /// Whether the image names an interpreter (`PT_INTERP`): dynamically linked.
+    pub fn has_interpreter(&self) -> bool;
     /// The loadable segments in program-header order.
     pub fn segments(&self) -> impl Iterator<Item = Segment<'a>> + '_;
 }
@@ -86,7 +88,7 @@ layout**:
 | magic, class 64, little endian, `e_version == 1`, `e_phentsize == 56` | parser |
 | `e_phoff + e_phnum * 56 <= len` | parser |
 | every `PT_LOAD`: `filesz <= memsz`, `offset + filesz <= len`, `vaddr + memsz` fits in `usize` | parser |
-| `machine() == 243` and `kind() == 2` | kernel |
+| `machine() == 243`, `kind() == 2`, and no `PT_INTERP` | kernel |
 | at least one `PT_LOAD`, each non-empty, `end <= TRAP_CONTEXT_BASE - PAGE_SIZE - USER_STACK_SIZE`, segments do not overlap | kernel |
 | mapping permissions: `U` always, plus `R`/`W`/`X` from the segment flags | kernel |
 
@@ -113,8 +115,8 @@ slots plus bytes do not fit).
 User stack, from the top down (`slot = 8`):
 
 ```
-ustack_top - (argc+1+envc+1)*slot : argv pointers, then envp pointers, each NUL-terminated
-below that                      : argv strings, then envp strings, 8-byte aligned sp
+ustack_top - (argc+1+envc+1)*slot : the argv array then the envp array, both NULL-pointer terminated
+below that                      : the argv strings then the envp strings, NUL-terminated, 8-byte aligned sp
 ```
 
 The trap context carries `a0 = argc`, `a1 = &argv[0]`, `a2 = &envp[0]`. The user
@@ -166,8 +168,9 @@ passing.
 ELF64 image plus one defect per case — no magic, ELF32 class, big-endian encoding,
 truncated header, `e_phoff` past EOF, `e_phentsize` wrong, `filesz > memsz`,
 `offset + filesz > len`, `vaddr` overflow, wrong machine, `ET_DYN`, no
-`PT_LOAD`, two disjoint segments with a bss tail, and a non-`PT_LOAD` header that
-must be skipped.
+`PT_LOAD`, two disjoint segments with a bss tail, a non-`PT_LOAD` header that
+must be skipped, and a `PT_INTERP` image that parses and reports its interpreter
+(the kernel refuses to run it).
 
 **Kernel program** `user/src/bin/elf_test.rs` (+1 in `SUCC_TESTS`, gate 76 → 77):
 crafts the defective images into regular files and asserts `exec` fails with

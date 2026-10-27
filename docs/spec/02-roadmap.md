@@ -109,6 +109,7 @@ Steps are sequential in the plan, but these have disjoint write scopes and may r
 ## 5. Module extraction policy (submodules)
 
 * Extract only when the crate has its own consumers or its own CI. `easy-fs` (M2.7) and the C allocator (M2.6) qualify; nothing else does yet.
+* `elf/` (M2.5) is built in-tree in the extractable shape (no_std core, host tests, no dependencies) but is **not** extracted now: it has exactly one consumer, the kernel. It is a candidate for `linur-io/elf` once the rule above is met — a second consumer or its own CI — and after the pin workflow is proven by M2.6/M2.7; not a commitment.
 * Repository naming `linur-io/<module>`; the mount point is the clean module path (`fs/`, `alloc/`).
 * A change spanning kernel and module is two commits plus a pin bump — the module lands first.
 * CI must run `git submodule update --init --recursive`; a stale pin is a silent failure mode, so the gate asserts the pinned commit matches the built artifact.

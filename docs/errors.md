@@ -95,11 +95,11 @@ kernel bug and must stay a panic.
 `user/src/bin/syscall_errors.rs`, registered in `usertests` `SUCC_TESTS` (a
 passing program: it asserts the error values and exits 0). It covers `ENOSYS`
 (unknown id), `EFAULT` (unmapped read/write/pipe/exec pointer, the kernel-only
-trampoline, a read-only user page for a kernel write), `EINVAL` (unknown `open`
-flags, invalid sync ids, malformed ELF, `fork` and `exec` from a thread) and the
-no-panic cases (`waittid` out of range, over-long file name, releasing an unheld
-mutex or semaphore). Each case prints `syscall_errors: ok <name>` or `FAIL`; the
-tally is the program's exit code.
+trampoline, a read-only user page for a kernel write), `ENOEXEC` (a malformed
+ELF image), `EINVAL` (unknown `open` flags, invalid sync ids, `fork` and `exec`
+from a thread) and the no-panic cases (`waittid` out of range, over-long file
+name, releasing an unheld mutex or semaphore). Each case prints
+`syscall_errors: ok <name>` or `FAIL`; the tally is the program's exit code.
 
 ## 6. M1.3b — the errno ABI, six arguments, per-arch tables
 
@@ -116,16 +116,16 @@ table is per architecture — `os/src/syscall/table.rs` holds the riscv64 table
 | value | name | produced by |
 |---|---|---|
 | −1 | `EPERM` | `chmod` unless the caller is root or the owner; `chown` and `mknod` unless root |
-| −2 | `ENOENT` | `open`/`exec`: no such file; `open("")` |
+| −2 | `ENOENT` | `open`/`exec`: no such file; `open("")`; a `#!` interpreter that does not exist |
 | −3 | `ESRCH` | `kill`/`waittid`: no such process or thread |
 | −6 | `ENXIO` | `open` of a character or block device node, or of a FIFO inode: no device table until M3.1, no pipe file until M6.2 (`docs/perm.md` §5/§9) |
-| −7 | `E2BIG` | `exec`: `argv` does not fit the user stack |
-| −8 | `ENOEXEC` | `exec`: not a loadable ELF image |
+| −7 | `E2BIG` | `exec`: the `argv` and `envp` pointers and bytes do not fit the user stack |
+| −8 | `ENOEXEC` | `exec`: an image the own parser refuses (`ElfError`), a wrong machine or non-`ET_EXEC` image, no loadable segment, out-of-range or overlapping segments, an empty `#!` interpreter, or a `#!` chain deeper than 4 (`docs/elf.md` §5/§6) |
 | −9 | `EBADF` | `read`/`write`/`close`/`dup`: bad descriptor |
 | −10 | `ECHILD` | `waitpid`: no such child |
 | −11 | `EAGAIN` | `waitpid`/`waittid`: child or thread has not exited |
 | −12 | `ENOMEM` | `brk`: request below the heap bottom or overlapping a mapping |
-| −13 | `EACCES` | the permission predicate of `docs/perm.md` §6: denied search, read, write or execute; `access` of a path that does not resolve; `exec`/`spawn` of a non-regular file |
+| −13 | `EACCES` | the permission predicate of `docs/perm.md` §6: denied search, read, write or execute; `access` of a path that does not resolve; `exec`/`spawn` of a non-regular file, or of a `#!` interpreter that is not one |
 | −14 | `EFAULT` | the pointer range is not accessible (see §2) |
 | −17 | `EEXIST` | `open` with `O_CREAT` and `O_EXCL` on an existing path; `mkdir`; `link` on an existing name |
 | −20 | `ENOTDIR` | a path component, or a trailing `/`, that is not a directory (every path-taking call); `open` with `O_DIRECTORY` on a non-directory; `getdents64` on a non-directory; `unlink` with `AT_REMOVEDIR` on a non-directory |

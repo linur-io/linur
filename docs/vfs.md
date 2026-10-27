@@ -1,13 +1,13 @@
-# linur — the VFS with paths (M2.2, updated at M2.4)
+# linur — the VFS with paths (M2.2, updated at M2.5)
 
-Status: interface contract for M2.2, updated by M2.3 and M2.4. `docs/perm.md` is
-the M2.3 contract (v3 inode layout, permission checks, `/dev` skeleton) and
-`docs/block.md` the M2.4 one (block driver, buffer cache, directory-block
-reclamation). Read with `spec/02` (M2.2–M2.4), `spec/01` §4/§5, `docs/errors.md`
-and `docs/reland.md`. M2.2 replaces the single-name lookup over one global inode
-with superblock, dentry and inode objects, a path walker, a per-process cwd, the
-directory operations, Linux open flags, fd `CLOEXEC`, and
-`stat`/`fstat`/`lseek`/hard links (link/unlink/nlink moved here from M2.1).
+Status: interface contract for M2.2, updated by M2.3, M2.4 and M2.5.
+`docs/perm.md` is the M2.3 contract, `docs/block.md` the M2.4 one and
+`docs/elf.md` the M2.5 one (own ELF parser, `envp`, `#!` scripts). Read with
+`spec/02` (M2.2–M2.5), `spec/01` §4/§5, `docs/errors.md` and `docs/reland.md`.
+M2.2 replaces the single-name lookup over one global inode with superblock, dentry
+and inode objects, a path walker, a per-process cwd, the directory operations,
+Linux open flags, fd `CLOEXEC`, and `stat`/`fstat`/`lseek`/hard links
+(link/unlink/nlink moved here from M2.1).
 
 ## 1. Scope
 
@@ -18,11 +18,14 @@ Linux-exact `open` flags; fd semantics including `CLOEXEC`; `stat`, `fstat`,
 (`mode`/`uid`/`gid`, device number), the permission checks,
 `chmod`/`chown`/`umask`/`access`/`mknod`, a mount table holding one filesystem
 and the `/dev` skeleton. M2.4 adds the block layer below all of it: our own
-virtio-blk driver and the hash-queue buffer cache with delayed write.
+virtio-blk driver and the hash-queue buffer cache with delayed write. M2.5 adds the
+own ELF loader behind `exec`/`execve`, with `envp` and `#!` scripts
+(`docs/elf.md`).
 
 Out: `mount()`/`umount()` and `chroot` (M6.1); the device table and the real
 devices (M3.1/M6.2); timestamps (M3.5); symlinks (DEFER); pipe SIGPIPE (M6.2); a
-dentry cache (not scheduled).
+dentry cache (not scheduled); PIE/ASLR and `PT_INTERP` images (out of scope,
+`docs/elf.md` §1).
 
 ## 2. On-disk format v3 (easy-fs)
 
@@ -270,7 +273,8 @@ The `dirfd`/`AT_FDCWD` arguments of the Linux calls these numbers belong to are
 implicit: `path` is resolved against the process cwd, exactly like `chdir`.
 `exec` and `spawn` resolve their path through the same walker (cwd-relative).
 `exec`/`spawn` of a non-regular file is `EACCES` since M2.3, as Linux does
-(`docs/perm.md` §6).
+(`docs/perm.md` §6). `envp`, `#!` scripts and the loader itself are specified in
+`docs/elf.md` §4/§5; the two-argument `exec` wrapper passes `envp = NULL`.
 
 ## 7. Linux open flags and open semantics
 

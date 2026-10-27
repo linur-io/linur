@@ -47,7 +47,7 @@ Every row must end as exactly one of:
 | process table | `task[]` array, index 0 is the idle task | same user-visible behaviour | TODO M3.5 (completes with sessions/pgrp) |
 | states | RUNNING / INTERRUPTIBLE / UNINTERRUPTIBLE / ZOMBIE / STOPPED | same five states | WIP M1.3 → DONE M1.3 |
 | `fork` | COW, child returns 0 | same, with COW | TODO M4.1 |
-| `execve` | a.out ZMAGIC only, shebang supported, argv/envp | ELF, shebang, `envp` | DELTA F2 |
+| `execve` | a.out ZMAGIC only, shebang supported, argv/envp | ELF, shebang, `envp` | DELTA F2 (own parser since M2.5: `envp`, `#!` scripts, no PIE/ASLR/`PT_INTERP` — `docs/elf.md` §2–§5) |
 | `exit` / `waitpid` | reparent to init, options WNOHANG/WUNTRACED, cutime/cstime | same semantics, blocking by default | WIP M1.3 → DONE M6.1 |
 | sessions and groups | `pgrp`, `session`, `leader`, `setsid`, controlling tty | same | TODO M3.5 |
 | accounting | utime / stime / cutime / cstime | same | TODO M3.5 |
@@ -125,7 +125,7 @@ Every row must end as exactly one of:
 | 8 | `creat` | DONE (M2.2: libc wrapper over `open` with `O_CREAT`, `O_WRONLY` and `O_TRUNC`; no separate number, as on Linux) |
 | 9 | `link` | DONE (M2.2: hard link with on-disk `nlink`) |
 | 10 | `unlink` | DONE (M2.2; `rmdir` is `AT_REMOVEDIR` 0x200) |
-| 11 | `execve` | WIP M1.3 → DONE M2.5 (envp and shebang; errno done at M1.3) |
+| 11 | `execve` | DONE (M2.5: `envp`, `#!` scripts and the own ELF parser; errno done at M1.3 — `docs/elf.md` §2–§5) |
 | 12 | `chdir` | DONE (M2.2: per-process cwd) |
 | 13 | `time` | WIP M1.3 → DONE M3.5: today it returns monotonic milliseconds; must return wall-clock seconds |
 | 14 | `mknod` | DONE (M2.3: `S_IFREG`/`S_IFCHR`/`S_IFBLK`/`S_IFIFO`; a bare permission word or `S_IFDIR` is `EINVAL`; umask masks the permission bits — `docs/perm.md` §7) |
@@ -183,7 +183,7 @@ Calls linur has that 0.11 does not: `getcwd` 17, `rename` 38 (0.11's number 38 i
 | libc | a small static libc outside the kernel tree | our own libc in `user/` | WIP M3.3 → DONE M3.3 |
 | shell | `/bin/sh` (rc) exec'd by `init` | our own shell | TODO M3.3 |
 | coreutils | distribution-dependent (ls, cat, cp, rm, mkdir, mount, ps…) | a small set: ls, cat, cd, mkdir, rm, ln, ps, echo | TODO M3.3 |
-| executable format | a.out ZMAGIC, static only | ELF, static only | DELTA F2 |
+| executable format | a.out ZMAGIC, static only | ELF, static only | DELTA F2 (own `elf/` parser since M2.5; no PIE, dynamic linking or `PT_INTERP`) |
 | shared libraries | absent | absent for v1.0 | DEFER |
 | init | `/etc/rc` then `/bin/sh` | same shape | TODO M3.3 |
 
@@ -192,7 +192,7 @@ Calls linur has that 0.11 does not: `getcwd` 17, `rename` 38 (0.11's number 38 i
 | item | Linux 0.11 | linur target | status |
 |---|---|---|---|
 | configuration | Makefile plus `config.h` | `config/<board>.toml` → generated consts | DELTA F8, TODO M5.1 |
-| test suite | none in tree | `make verify` + host tests + userland suite | DONE (M2.1 adds the 13 lab regression tests; M2.2 adds the 8 VFS programs; M2.3 adds `perm_test`, `dev_test` and `mount_test`; M2.4 adds `disk_stress_test` for 76 in total, plus four host-test case groups (delayed write, cache hits, >64-block capacity, reclamation) — `verify/report.txt`) |
+| test suite | none in tree | `make verify` + host tests + userland suite | DONE (M2.1 adds the 13 lab regression tests; M2.2 adds the 8 VFS programs; M2.3 adds `perm_test`, `dev_test` and `mount_test`; M2.4 adds `disk_stress_test` for 76 in total, plus four host-test case groups (delayed write, cache hits, >64-block capacity, reclamation); M2.5 adds `elf_test` for 77 in total, plus the `elf` crate's 18 host-test cases — `verify/report.txt`) |
 | CI | none | every milestone gate, both architectures | WIP M1.4 → DONE M5.4 (per-architecture capability matrix from M1.5: riscv64 full suite, x86_64 smoke path (`docs/x86_64-smoke.md`), x86_64 compile-only check — `verify/report.json`; the x86_64 full suite is M5.4) |
 | parity evidence | — | this file, updated at each gate | WIP → DONE M6.4 |
 

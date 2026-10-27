@@ -55,7 +55,7 @@
 | **配置** | `Makefile` + `config.h`（`RAMDISK` 被注释掉；键盘布局 KBD_FINNISH 与 KBD_US/GR/FR） | `config.rs` 里硬编码的 `const`；没有 feature，没有 Kconfig，没有构建期配置 | `config/<board>.toml` → 生成的常量（D6） |
 | **测试 / CI** | 源码树里没有（实验课另外接上 `testlab2.c` 之类） | 没有 CI，没有 `test` 目标，只有一个宿主机测试（`easy-fs-fuse::efs_test`，通过）；`make run TEST=1` 是交互式的，但**确实**会返回 QEMU 退出码 0 / 255（实测）；55 个应用里有 16 个从未被跑到；`usertests` 只是碰巧通过（一个缺失的应用被算作预期失败） | `make verify` 门禁 + 真正的矩阵 |
 | **用户态 / libc** | 不带用户态；`lib/` 是 mini-libc；程序是 a.out ZMAGIC，`N_TXTOFF == 1024`，静态链接，没有共享库；`init` 先 exec `/etc/rc`，再 exec `/bin/sh` | 自制的 `user_lib`（没有 errno，没有 environ，没有 stdio 缓冲）；55 个测试程序，包括一个支持 `<`、`>`、`|` 且没有内建命令的 shell；应用是打包进 `fs.img` 的 RISC-V ELF | 自建 libc + shell + coreutils；ELF（已经是 ELF） |
-| **ELF / exec** | 只有 a.out **ZMAGIC**，支持 `#!` 脚本，argv/envp 放在 MAX_ARG_PAGES 上 | ELF `PT_LOAD`，带 U/R/W/X，没有 `envp`，没有 PIE/ASLR，没有 `CLOEXEC` | 完整的 `execve`，支持 envp、shebang、`CLOEXEC` |
+| **ELF / exec** | 只有 a.out **ZMAGIC**，支持 `#!` 脚本，argv/envp 放在 MAX_ARG_PAGES 上 | 自建的 ELF64 解析器（`elf/`）位于 `MemorySet::from_elf` 之后：`PT_LOAD` 带 U/R/W/X，支持 `envp`、`#!` 脚本与按描述符的 `CLOEXEC`；没有 PIE/ASLR/`PT_INTERP` | 只剩 F2/F9：不支持 a.out 或 MINIX 镜像（L3）；PIE/`PT_INTERP` 不在范围内 |
 
 ## 4. 系统调用覆盖情况
 
@@ -98,7 +98,7 @@
 6. **`read(0, buf, n>1)` 会 panic**（`fs/stdio.rs` 里的 `assert_eq!(user_buf.len(), 1)`）。
 7. **向已被放弃的管道写入会永久阻塞**（不跟踪读端，没有 EPIPE/SIGPIPE）。
 8. **`fork`/`exec` 断言只有一个线程**，所以多线程进程无法 fork。
-9. **Tier-0 依赖违规**：`xmas-elf`（ELF 解析）、`buddy_system_allocator`（内核堆）、`sbi-rt`，外加随仓库携带的 RustSBI 二进制。钉在某个 git rev 上的 `virtio-drivers` 曾在列，M2.4 用自己的块驱动替换了它。
+9. **Tier-0 依赖违规**：`buddy_system_allocator`（内核堆）、`sbi-rt`，外加随仓库携带的 RustSBI 二进制。钉在某个 git rev 上的 `virtio-drivers` 与 `xmas-elf`（ELF 解析）曾在列，M2.4 和 M2.5 分别用自己的块驱动与 ELF 解析器替换了它们。
 10. **实验特性已经从 HEAD 中消失**：`mmap`/`munmap`/`sbrk`（`7709ba3`）、`sys_trace`（`851e377`）、`spawn`（`c505a09`）、stride + `setprio`（`2a242b5`）、`link`/`unlink`/`fstat`（`c82eb2d`）。它们可以作为参考 diff 找回（约 1,500 行，含各自的测试程序，这些程序值得留作测试）。
 
 ## 7. linur 领先 0.11 的地方
