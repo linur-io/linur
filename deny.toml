@@ -11,18 +11,18 @@
 #   Tier 1 — permanently allowed: the riscv / x86_64 architecture wrappers, bitflags,
 #            cfg-if.
 #   Tier 2 — temporary, each with a removal step in DEPENDENCIES.md: spin (now only
-#            inside buddy_system_allocator, M2.6), xmas-elf (M2.5),
-#            buddy_system_allocator (M2.6), sbi-rt (M5.5), the vendored
-#            bootloader/rustsbi-qemu.bin (M5.5), and lazy_static, whose removal step
-#            is an open D7 gap awaiting an owner decision. log, virtio-drivers and
-#            volatile left the graph with our own block driver at M2.4 and are now
-#            banned outright.
+#            inside buddy_system_allocator, M2.6), buddy_system_allocator (M2.6),
+#            sbi-rt (M5.5), the vendored bootloader/rustsbi-qemu.bin (M5.5), and
+#            lazy_static, whose removal step is an open D7 gap awaiting an owner
+#            decision. log, virtio-drivers and volatile left the graph with our own
+#            block driver at M2.4, and xmas-elf with our own ELF parser at M2.5; all
+#            are now banned outright.
 #
 # Enforcement lands in M1.4's CI, which runs `cargo deny check` after `make lint` and
 # before `make verify`; the local `make lint` covers fmt and clippy only, so
 # cargo-deny stays a CI prerequisite (it needs the advisory database). There is no
 # Cargo workspace yet (the split is M5.2), so the check runs once per manifest: os,
-# user, easy-fs. easy-fs-fuse is host-only tooling outside the D7 claim and is
+# user, easy-fs, elf. easy-fs-fuse is host-only tooling outside the D7 claim and is
 # deliberately not a target — its clap/rand closure is not ledgered here.
 #
 # Checked with cargo-deny 0.20.2 on the three manifests: licenses, bans, sources and
@@ -67,6 +67,8 @@ allow = [
     # M1.5: the HAL seam and the x86_64 smoke path, both ours.
     "hal",
     "x86-smoke",
+    # M2.5: our own ELF parser.
+    "elf",
     # Tier 1 — permanently allowed.
     "bitflags",
     "critical-section",
@@ -86,12 +88,11 @@ allow = [
     "sbi-rt",
     "sbi-spec",
     "spin",
-    "xmas-elf",
-    "zero",
 ]
 # Crates whose Tier-2 removal has landed. A retired crate is banned outright so that
-# it cannot silently return: M2.4 retired the block driver and the log facade.
-deny = ["log", "virtio-drivers", "volatile"]
+# it cannot silently return: M2.4 retired the block driver and the log facade, M2.5
+# the ELF parser.
+deny = ["log", "virtio-drivers", "volatile", "xmas-elf", "zero"]
 
 [sources]
 unknown-registry = "deny"
@@ -108,8 +109,6 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # Tier-2 crates are retired by the ledger, not by advisory status, so unmaintained
 # advisories only fail the check for crates we publish ourselves.
 unmaintained = "workspace"
-# RUSTSEC-2025-0018: xmas-elf 0.7.0 reads out of bounds on a malformed ELF. The only
-# images the kernel parses are the ones our own toolchain built and our own packer
-# wrote into fs.img, so there is no untrusted input path before M2.5 replaces xmas-elf
-# with our own loader. M2.5 must delete this ignore; it then reports as unused.
-ignore = ["RUSTSEC-2025-0018"]
+# M2.5 removed the RUSTSEC-2025-0018 ignore together with xmas-elf, the crate it
+# described: the kernel now parses images with our own elf crate.
+ignore = []

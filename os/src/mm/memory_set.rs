@@ -14,6 +14,11 @@ use core::arch::asm;
 use lazy_static::*;
 use riscv::register::satp;
 
+/// `e_machine` of RISC-V, the machine this kernel runs (docs/elf.md §3).
+const EM_RISCV: u16 = 243;
+/// `e_type` of a static executable; a PIE image (3) is not supported.
+const ET_EXEC: u16 = 2;
+
 unsafe extern "C" {
     safe fn stext();
     safe fn etext();
@@ -192,42 +197,34 @@ impl MemorySet {
         let mut memory_set = Self::new_bare();
         // map trampoline
         memory_set.map_trampoline();
-        // map program headers of elf, with U flag
-        let elf = xmas_elf::ElfFile::new(elf_data).ok()?;
-        let elf_header = elf.header;
-        if elf_header.pt1.magic != [0x7f, 0x45, 0x4c, 0x46] {
+        // map the loadable segments of an image this machine can run (docs/elf.md §3)
+        let elf = elf::parse(elf_data).ok()?;
+        // F2: ELF, static, non-PIE; the x86_64 machine arrives at M5.4
+        if elf.machine() != EM_RISCV || elf.kind() != ET_EXEC {
             return None;
         }
-        let ph_count = elf_header.pt2.ph_count();
+        // a dynamically linked image needs its interpreter, which v1.0 has none of
+        if elf.has_interpreter() {
+            return None;
+        }
         let mut max_end_vpn = VirtPageNum(0);
-        for i in 0..ph_count {
-            let ph = elf.program_header(i).ok()?;
-            if ph.get_type().ok()? != xmas_elf::program::Type::Load {
-                continue;
-            }
-            let start: usize = ph.virtual_addr() as usize;
-            let end = start.checked_add(ph.mem_size() as usize)?;
+        let mut segments = 0;
+        for segment in elf.segments() {
+            let start: usize = segment.vaddr;
+            let end = start.checked_add(segment.memsz)?;
             // A loadable image must end below the trap context page, which sits
             // above the user stack, and must not be empty.
             if end <= start || end > TRAP_CONTEXT_BASE - PAGE_SIZE - USER_STACK_SIZE {
                 return None;
             }
-            if ph.file_size() > ph.mem_size() {
-                return None;
-            }
-            let offset = ph.offset() as usize;
-            let data = elf
-                .input
-                .get(offset..offset.checked_add(ph.file_size() as usize)?)?;
             let mut map_perm = MapPermission::U;
-            let ph_flags = ph.flags();
-            if ph_flags.is_read() {
+            if segment.read {
                 map_perm |= MapPermission::R;
             }
-            if ph_flags.is_write() {
+            if segment.write {
                 map_perm |= MapPermission::W;
             }
-            if ph_flags.is_execute() {
+            if segment.execute {
                 map_perm |= MapPermission::X;
             }
             let map_area = MapArea::new(start.into(), end.into(), MapType::Framed, map_perm);
@@ -236,7 +233,11 @@ impl MemorySet {
                 return None;
             }
             max_end_vpn = map_area.vpn_range.get_end();
-            memory_set.push(map_area, Some(data));
+            memory_set.push(map_area, Some(segment.data));
+            segments += 1;
+        }
+        if segments == 0 {
+            return None;
         }
         let max_end_va: VirtAddr = max_end_vpn.into();
         let mut user_stack_base: usize = max_end_va.into();
@@ -253,11 +254,7 @@ impl MemorySet {
             ),
             None,
         );
-        Some((
-            memory_set,
-            user_stack_base,
-            elf.header.pt2.entry_point() as usize,
-        ))
+        Some((memory_set, user_stack_base, elf.entry()))
     }
     pub fn from_existed_user(user_space: &MemorySet) -> MemorySet {
         let mut memory_set = Self::new_bare();

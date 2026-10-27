@@ -287,15 +287,16 @@ impl ProcessControlBlock {
     }
 
     /// Only support processes with a single thread (checked by `sys_exec`).
-    /// Returns false when the image cannot be loaded or `argv` does not fit.
-    pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) -> bool {
+    /// Returns false when the image cannot be loaded or `argv`/`envp` do not fit.
+    pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>, envs: Vec<String>) -> bool {
         let Some((memory_set, ustack_base, entry_point)) = MemorySet::from_elf(elf_data) else {
             return false;
         };
         let slot_size = core::mem::size_of::<usize>();
-        let argv_slots = (args.len() + 1) * slot_size;
-        let argv_bytes: usize = args.iter().map(|arg| arg.len() + 1).sum();
-        if argv_slots + argv_bytes + slot_size > USER_STACK_SIZE {
+        let pointers = (args.len() + envs.len() + 2) * slot_size;
+        let bytes: usize = args.iter().map(|arg| arg.len() + 1).sum::<usize>()
+            + envs.iter().map(|env| env.len() + 1).sum::<usize>();
+        if pointers + bytes + slot_size > USER_STACK_SIZE {
             return false;
         }
         let new_token = memory_set.token();
@@ -308,18 +309,30 @@ impl ProcessControlBlock {
         task_inner.res.as_mut().unwrap().ustack_base = ustack_base;
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
-        // push arguments on user stack: the argv array first, then its strings
-        let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top() - argv_slots;
+        // push the argv and envp pointer arrays first, then their strings
+        let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top() - pointers;
         let argv_base = user_sp;
+        let envp_base = argv_base + (args.len() + 1) * slot_size;
         for (i, arg) in args.iter().enumerate() {
             user_sp -= arg.len() + 1;
             write_user(new_token, argv_base + i * slot_size, &user_sp.to_ne_bytes());
             write_user(new_token, user_sp, arg.as_bytes());
             write_user(new_token, user_sp + arg.len(), &[0]);
         }
+        for (i, env) in envs.iter().enumerate() {
+            user_sp -= env.len() + 1;
+            write_user(new_token, envp_base + i * slot_size, &user_sp.to_ne_bytes());
+            write_user(new_token, user_sp, env.as_bytes());
+            write_user(new_token, user_sp + env.len(), &[0]);
+        }
         write_user(
             new_token,
             argv_base + args.len() * slot_size,
+            &0usize.to_ne_bytes(),
+        );
+        write_user(
+            new_token,
+            envp_base + envs.len() * slot_size,
             &0usize.to_ne_bytes(),
         );
         // make the user_sp aligned to 8B for k210 platform
@@ -334,6 +347,7 @@ impl ProcessControlBlock {
         );
         trap_cx.x[10] = args.len();
         trap_cx.x[11] = argv_base;
+        trap_cx.x[12] = envp_base;
         *task_inner.get_trap_cx() = trap_cx;
         drop(task_inner);
         // The new image is installed, so this exec succeeds: close CLOEXEC fds.

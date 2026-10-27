@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::config::USER_STACK_SIZE;
 use crate::errno::{E2BIG, EACCES, EAGAIN, ECHILD, EINVAL, ENOEXEC, ESRCH};
-use crate::fs::{Cred, MAY_EXEC, lookup, permission, read_all};
+use crate::fs::{Cred, Dentry, MAY_EXEC, lookup, permission, read_all};
 use crate::mm::{copy_from_user, copy_to_user, translated_str};
 use crate::task::{
     SignalFlags, current_process, current_task, current_user_token, exit_current_and_run_next,
@@ -50,63 +50,134 @@ pub fn sys_fork() -> isize {
     new_pid as isize
 }
 
+/// How many `#!` interpreters may follow each other (Linux uses 4).
+const SHEBANG_LIMIT: usize = 4;
+/// The longest interpreter line the kernel reads from a script.
+const SHEBANG_LINE_MAX: usize = 128;
+
+/// Copy a NULL-terminated vector of user strings, charging the user stack budget
+/// (docs/elf.md §4).
+fn copy_strings(
+    token: usize,
+    mut ptr: *const usize,
+    budget: &mut usize,
+) -> Result<Vec<String>, isize> {
+    let mut strings = Vec::new();
+    loop {
+        let mut slot = [0u8; size_of::<usize>()];
+        copy_from_user(token, &mut slot, ptr as *const u8)?;
+        let string_addr = usize::from_ne_bytes(slot);
+        if string_addr == 0 {
+            return Ok(strings);
+        }
+        let string = translated_str(token, string_addr as *const u8)?;
+        *budget += string.len() + 1;
+        if *budget + size_of::<usize>() > USER_STACK_SIZE {
+            return Err(E2BIG);
+        }
+        strings.push(string);
+        ptr = ptr.wrapping_add(1);
+    }
+}
+
+/// The interpreter and its optional argument of a `#!` image, or `None` when the
+/// image is not a script (docs/elf.md §5).
+fn shebang(image: &[u8]) -> Result<Option<(String, Option<String>)>, isize> {
+    if !image.starts_with(b"#!") {
+        return Ok(None);
+    }
+    let line = &image[2..image.len().min(2 + SHEBANG_LINE_MAX)];
+    let end = line
+        .iter()
+        .position(|&byte| byte == b'\n')
+        .unwrap_or(line.len());
+    let Ok(text) = core::str::from_utf8(&line[..end]) else {
+        return Err(ENOEXEC);
+    };
+    let mut words = text.trim().splitn(2, [' ', '\t']);
+    let interpreter = words.next().unwrap_or("").trim();
+    if interpreter.is_empty() {
+        return Err(ENOEXEC);
+    }
+    let argument = words
+        .next()
+        .map(|rest| String::from(rest.trim()))
+        .filter(|rest| !rest.is_empty());
+    Ok(Some((String::from(interpreter), argument)))
+}
+
+/// Resolve the image to run and the argv it gets, following `#!` lines
+/// (docs/elf.md §5).
+fn exec_image(
+    cwd: &Arc<Dentry>,
+    cred: Cred,
+    mut path: String,
+    mut args: Vec<String>,
+) -> Result<(Vec<u8>, Vec<String>), isize> {
+    for _ in 0..SHEBANG_LIMIT {
+        let dentry = lookup(cwd, &path, cred)?;
+        let inode = dentry.inode();
+        // 0.11 answers EACCES for an image that is not a regular file; a real image
+        // also has to grant execute permission (docs/perm.md §6).
+        if !inode.is_file() {
+            return Err(EACCES);
+        }
+        permission(inode, MAY_EXEC, cred)?;
+        let image = read_all(inode);
+        let Some((interpreter, argument)) = shebang(&image)? else {
+            return Ok((image, args));
+        };
+        // The interpreter runs with [interp, arg?, script, argv[1..]].
+        let mut next = Vec::with_capacity(args.len() + 3);
+        next.push(interpreter.clone());
+        if let Some(argument) = argument {
+            next.push(argument);
+        }
+        next.push(path.clone());
+        next.extend(args.iter().skip(1).cloned());
+        path = interpreter;
+        args = next;
+    }
+    Err(ENOEXEC)
+}
+
 /// Replace the current image; returns `argc`, which becomes the child's a0.
-pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
+pub fn sys_exec(path: *const u8, args: *const usize, envp: *const usize) -> isize {
     let token = current_user_token();
     let path = match translated_str(token, path) {
         Ok(path) => path,
         Err(e) => return e,
     };
-    let mut args_vec: Vec<String> = Vec::new();
-    // The argv array and the strings share the user stack, so the stack bounds
-    // them; bounding them here also bounds the kernel memory they occupy.
-    let mut argv_bytes = size_of::<usize>();
-    loop {
-        let mut slot = [0u8; size_of::<usize>()];
-        if let Err(e) = copy_from_user(token, &mut slot, args as *const u8) {
-            return e;
-        }
-        let arg_str_ptr = usize::from_ne_bytes(slot);
-        if arg_str_ptr == 0 {
-            break;
-        }
-        let arg = match translated_str(token, arg_str_ptr as *const u8) {
-            Ok(arg) => arg,
+    // `argv` and `envp` share the user stack budget (docs/elf.md §4).
+    let mut budget = 2 * size_of::<usize>();
+    let args_vec = match copy_strings(token, args, &mut budget) {
+        Ok(args) => args,
+        Err(e) => return e,
+    };
+    // `exec` passes no environment; a null envp is an empty one.
+    let envs = if envp.is_null() {
+        Vec::new()
+    } else {
+        match copy_strings(token, envp, &mut budget) {
+            Ok(envs) => envs,
             Err(e) => return e,
-        };
-        argv_bytes += arg.len() + 1 + size_of::<usize>();
-        if argv_bytes + size_of::<usize>() > USER_STACK_SIZE {
-            return E2BIG;
         }
-        args_vec.push(arg);
-        unsafe {
-            args = args.add(1);
-        }
-    }
+    };
     // The image is resolved against the working directory, like every path.
     let cwd = current_process().inner_exclusive_access().cwd.clone();
     let cred = Cred::current();
-    let app = match lookup(&cwd, &path, cred) {
-        Ok(app) => app,
+    let (image, args) = match exec_image(&cwd, cred, path, args_vec) {
+        Ok(image) => image,
         Err(e) => return e,
     };
-    // 0.11 answers EACCES for an image that is not a regular file; a real image
-    // also has to grant execute permission (docs/perm.md §6).
-    if !app.inode().is_file() {
-        return EACCES;
-    }
-    if let Err(e) = permission(app.inode(), MAY_EXEC, cred) {
-        return e;
-    }
-    let all_data = read_all(app.inode());
     let process = current_process();
     // A new image replaces the one address space, so it cannot be shared
     // with other threads.
     if process.inner_exclusive_access().thread_count() != 1 {
         return EINVAL;
     }
-    let argc = args_vec.len();
-    if !process.exec(all_data.as_slice(), args_vec) {
+    let argc = args.len();
+    if !process.exec(&image, args, envs) {
         return ENOEXEC;
     }
     // return argc because cx.x[10] will be covered with it later
@@ -114,7 +185,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
 }
 
 /// Create a child process from the executable at `path`, resolved against the
-/// working directory, with an empty argument list, and return its pid.
+/// working directory, following `#!` lines; the child starts with an empty argv.
 pub fn sys_spawn(path: *const u8) -> isize {
     let token = current_user_token();
     let path = match translated_str(token, path) {
@@ -123,18 +194,12 @@ pub fn sys_spawn(path: *const u8) -> isize {
     };
     let cwd = current_process().inner_exclusive_access().cwd.clone();
     let cred = Cred::current();
-    let app = match lookup(&cwd, &path, cred) {
-        Ok(app) => app,
+    let argv = alloc::vec![path.clone()];
+    let (image, _) = match exec_image(&cwd, cred, path, argv) {
+        Ok(image) => image,
         Err(e) => return e,
     };
-    if !app.inode().is_file() {
-        return EACCES;
-    }
-    if let Err(e) = permission(app.inode(), MAY_EXEC, cred) {
-        return e;
-    }
-    let all_data = read_all(app.inode());
-    let Some(child) = current_process().spawn(all_data.as_slice()) else {
+    let Some(child) = current_process().spawn(&image) else {
         return ENOEXEC;
     };
     child.getpid() as isize

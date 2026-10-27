@@ -1,7 +1,7 @@
 # Dependency ledger
 
-One row per third-party crate in the `os`, `user`, `easy-fs`, `hal` and `x86-smoke`
-dependency graphs — direct and transitive, including the proc-macro crates compiled
+One row per third-party crate in the `os`, `user`, `easy-fs`, `elf`, `hal` and
+`x86-smoke` dependency graphs — direct and transitive, including the proc-macro crates compiled
 for the host while building them — with versions as pinned in the tracked
 `Cargo.lock` files. Tiers are D7 (`docs/spec/00-requirements.md` §3):
 
@@ -26,7 +26,8 @@ M1.5 smoke path is hand-written assembly plus our own code; the full port that p
 the crate in is M5.4) and `cfg-if` (reached only from host-only tooling today). The
 M1.5 crates add no third-party dependency — `hal` is dependency-free and `x86-smoke`
 depends only on `hal` — and both are our own Tier-0 crates, so `deny.toml` lists them
-in its allow set and they have no row here.
+in its allow set and they have no row here. `elf` (M2.5) is in the same position: a
+dependency-free Tier-0 crate of ours.
 
 ## Kernel-image graph
 
@@ -50,16 +51,13 @@ in its allow set and they have no row here.
 | static_assertions | 1.1.0 | compile-time asserts in `sbi-spec` | Tier 2 | Fuxi | M5.5 |
 | syn | 2.0.119 | procedural-macro parsing, host-side at build time | Tier 1 | Fuxi | — |
 | unicode-ident | 1.0.24 | identifier tables for `proc-macro2` and `syn`, host-side at build time | Tier 1 | Fuxi | — |
-| xmas-elf | 0.7.0 | ELF parsing in `exec` — **Tier-0 violation** | Tier 2 | Fuxi | M2.5 |
-| zero | 0.1.3 | `Zero` trait bounds used by `xmas-elf` | Tier 2 | Fuxi | M2.5 |
 | bootloader/rustsbi-qemu.bin | RustSBI 0.3.1, 32 KiB | S-mode firmware the kernel boots under — **Tier-0 violation**; a vendored binary, not a crate, so it has no `deny.toml` entry | Tier 2 | Fuxi | M5.5 |
 
 **Checks.** `cargo deny check licenses bans sources advisories` is green for `os`,
-`user`, `easy-fs`, `hal` and `x86-smoke` with cargo-deny 0.20.2. The only advisory
-in the graph is RUSTSEC-2025-0018 against `xmas-elf` (out-of-bounds read on a
-malformed ELF); it is ignored in `deny.toml` until M2.5 replaces the parser, since no
-untrusted image reaches `exec` before then. M2.4 removed `virtio-drivers`, `volatile`
-and `log` from the graph, so the license check no longer carries that warning.
+`user`, `easy-fs`, `elf`, `hal` and `x86-smoke` with cargo-deny 0.20.2. The graph now
+carries no advisory at all: M2.4 removed `virtio-drivers`, `volatile` and `log`, and
+M2.5 removed `xmas-elf` and its `zero` bound together with the RUSTSEC-2025-0018
+ignore the first of them carried. The license check carries no warnings either.
 
 ## Host-only tooling
 

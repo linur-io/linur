@@ -45,33 +45,54 @@ const USER_HEAP_SIZE: usize = 32768;
 
 static mut HEAP_SPACE: [u8; USER_HEAP_SIZE] = [0; USER_HEAP_SIZE];
 
+/// The environment the kernel handed this process (docs/elf.md §4).
+static mut ENVIRON: &[&str] = &[];
+
 #[global_allocator]
 static HEAP: LockedHeap = LockedHeap::empty();
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.entry")]
-pub extern "C" fn _start(argc: usize, argv: usize) -> ! {
+pub extern "C" fn _start(argc: usize, argv: usize, envp: usize) -> ! {
     unsafe {
         HEAP.lock()
             .init(addr_of_mut!(HEAP_SPACE) as usize, USER_HEAP_SIZE);
     }
-    let mut v: Vec<&'static str> = Vec::new();
-    for i in 0..argc {
-        let str_start =
-            unsafe { ((argv + i * core::mem::size_of::<usize>()) as *const usize).read_volatile() };
+    let args = unsafe { strings(argv, Some(argc)) };
+    let envs = unsafe { strings(envp, None) };
+    // the process keeps its environment for `environ()`; its pages live as long as it does
+    unsafe { ENVIRON = alloc::boxed::Box::leak(envs.into_boxed_slice()) };
+    unsafe {
+        exit(main(argc, args.as_slice()));
+    }
+}
+
+/// Read a NUL-terminated vector of strings from the stack; `count` bounds argv,
+/// `None` reads until the NUL pointer for envp (docs/elf.md §4).
+unsafe fn strings(mut ptr: usize, count: Option<usize>) -> Vec<&'static str> {
+    let mut strings = Vec::new();
+    while count.is_none_or(|count| strings.len() < count) && ptr != 0 {
+        let str_start = unsafe { (ptr as *const usize).read_volatile() };
+        if str_start == 0 {
+            break;
+        }
         let len = (0usize..)
             .find(|i| unsafe { ((str_start + *i) as *const u8).read_volatile() == 0 })
             .unwrap();
-        v.push(
+        strings.push(
             core::str::from_utf8(unsafe {
                 core::slice::from_raw_parts(str_start as *const u8, len)
             })
             .unwrap(),
         );
+        ptr += core::mem::size_of::<usize>();
     }
-    unsafe {
-        exit(main(argc, v.as_slice()));
-    }
+    strings
+}
+
+/// The environment this process was exec'd with, empty when none was given.
+pub fn environ() -> &'static [&'static str] {
+    unsafe { core::ptr::read(core::ptr::addr_of!(ENVIRON)) }
 }
 
 bitflags! {
@@ -288,7 +309,11 @@ pub fn fork() -> isize {
     sys_fork()
 }
 pub fn exec(path: &str, args: &[*const u8]) -> isize {
-    sys_exec(path, args)
+    sys_exec(path, args.as_ptr(), core::ptr::null())
+}
+/// `execve`: like `exec`, with a NULL-terminated environment array.
+pub fn execve(path: &str, args: &[*const u8], envs: &[*const u8]) -> isize {
+    sys_exec(path, args.as_ptr(), envs.as_ptr())
 }
 /// Create a process from the image at `path` and return its pid.
 pub fn spawn(path: &str) -> isize {

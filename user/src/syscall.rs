@@ -244,10 +244,17 @@ pub fn sys_fork() -> isize {
     syscall(SYSCALL_FORK, [0, 0, 0, 0, 0, 0])
 }
 
-pub fn sys_exec(path: &str, args: &[*const u8]) -> isize {
+pub fn sys_exec(path: &str, args: *const *const u8, envs: *const *const u8) -> isize {
     syscall(
         SYSCALL_EXEC,
-        [path.as_ptr() as usize, args.as_ptr() as usize, 0, 0, 0, 0],
+        [
+            path.as_ptr() as usize,
+            args as usize,
+            envs as usize,
+            0,
+            0,
+            0,
+        ],
     )
 }
 
