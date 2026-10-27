@@ -34,7 +34,7 @@ jobs:
             ~/.cargo/advisory-dbs
             os/target
             user/target
-            easy-fs/target
+            fs/target
             easy-fs-fuse/target
             hal/target
             heap/target
@@ -50,7 +50,7 @@ jobs:
           if ! command -v cargo-deny >/dev/null; then
             cargo install cargo-deny --locked --version 0.20.2
           fi
-          for d in os user easy-fs elf hal heap x86-smoke; do (cd "$d" && cargo deny check); done
+          for d in os user fs elf hal heap x86-smoke; do (cd "$d" && cargo deny check); done
 
       - name: Lint
         run: make lint

@@ -14,7 +14,7 @@ verify-negative:
 lint:
 	cd os && cargo fmt --check && cargo clippy -- -D warnings
 	cd elf && cargo fmt --check && cargo clippy --all-targets -- -D warnings
-	cd easy-fs && cargo fmt --check && cargo clippy -- -D warnings
+	cd fs && cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
 	cd heap && cargo fmt --check && cargo clippy --all-targets -- -D warnings
 	cd hal && cargo fmt --check && cargo clippy -- -D warnings
 	cd x86-smoke && cargo fmt --check && cargo clippy --target x86_64-unknown-none -- -D warnings
