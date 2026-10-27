@@ -84,8 +84,10 @@ Every row is reachable from user space and used to kill the kernel.
 ## 4. Deliberately still fatal, or deferred
 
 Resource exhaustion is a policy question, not an argument-validation one, and it
-has owners elsewhere: frame allocation and kernel-heap exhaustion → M4.4; disk
-full and the 32-bit file-size ceiling → M2.2/M2.4; a trap taken in S-mode is a
+has owners elsewhere: frame allocation and kernel-heap exhaustion → M4.4. A full
+disk is still a panic — the data bitmap's allocation unwraps (`docs/block.md`
+§12) — and is unassigned after M2.4; the 32-bit file-size ceiling is unreachable
+with the current on-disk format (≈8.1 MiB per file). A trap taken in S-mode is a
 kernel bug and must stay a panic.
 
 ## 5. Negative tests

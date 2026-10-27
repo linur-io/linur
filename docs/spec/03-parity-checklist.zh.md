@@ -74,7 +74,7 @@
 | 路径 | 逐分量遍历，没有 MAX_PATH 检查 | 支持 dot、dotdot、cwd 的遍历器 | DONE（M2.2：`.`/`..` 走真实目录项；分量 27 字节、路径 4096 字节） |
 | 名称长度 | 14 个字符 | 长文件名 | DELTA F11 |
 | 磁盘格式 | MINIX v1，1 KiB 块，32 字节 inode，7+1+1 个区 | 沿 easy-fs 一脉的自有格式 | DELTA F12（v3：`mode`/`uid`/`gid`、26 个直接表项、设备号存在 `direct[0]` —— `docs/perm.md` §3） |
-| 缓冲区缓存 | 哈希队列 + 空闲链表，预读，电梯 | 哈希队列，延迟写，`sync` | TODO M2.4 |
+| 缓冲区缓存 | 哈希队列 + 空闲链表，预读，电梯 | 哈希队列，延迟写，`sync` | DONE（M2.4：16 个哈希桶里共 64 个缓存，按空闲链表淘汰并跳过被钉住的缓存，延迟写在淘汰或 `block_cache_sync_all()` 时落盘；`sync` 系统调用仍在 M6.1 —— `docs/block.md` §7） |
 | 挂载 | 8 项的表，仅 MINIX，没有文件系统类型参数 | 挂载表，至少一种文件系统 | DONE（M2.3：`os/src/fs/mount.rs` 的挂载表只持有一种文件系统；`mount()`/`umount()` 仍在 M6.1 —— `docs/perm.md` §5） |
 | 权限 | owner/group/other、`suser()`、`chmod`、`chown`、`umask` | 相同 | DONE（M2.3：磁盘上的 mode/uid/gid、`umask`、在 0.11 各调用点的 `permission()` 判定 —— `docs/perm.md` §2/§6） |
 | fd 表 | `NR_OPEN` 20，全局文件表 64 | 没有人为上限 | DELTA F4（自 M2.2 起按描述符的 `CLOEXEC`） |
@@ -93,7 +93,7 @@
 | 串口 | 8250，固定 2400 bps，两个端口 | 自有的 UART 驱动，可用的速率 | TODO M3.1 |
 | 定时器 | 8253/8254，HZ 100，LATCH 11931 | 相同的 tick 速率；自有的 PIT/HPET 驱动 | TODO M5.4 |
 | 中断控制器 | 8259 主片 + 从片，显式 EOI | 自有的 PIC 或 APIC 处理 | TODO M5.4 |
-| 块设备 | 软盘 + ST-506/ATA，CHS，请求电梯 | 自有的带请求队列的驱动 | TODO M2.4 |
+| 块设备 | 软盘 + ST-506/ATA，CHS，请求电梯 | 自有的带请求队列的驱动 | DONE（M2.4：自建的 legacy virtio-MMIO 驱动，8 个描述符的 split virtqueue 请求队列，DMA 放在静态区 —— `docs/block.md` §2–§4） |
 | 软盘 | 完整的 FDC + DMA 驱动 | 不提供 | DEFER：博物馆里的硬件，对用户没有价值 |
 | ramdisk | 可选，默认关闭 | v1.0 不提供 | DEFER |
 | 设备层 | major/minor 分发表 | 相同的形态 | TODO M3.1 |
@@ -146,7 +146,7 @@
 | 30 | `utime` | TODO M3.5 |
 | 33 | `access` | DONE（M2.3：请求的权限位；`F_OK` 只查存在；无法解析的路径返回 `EACCES`，与 0.11 一致） |
 | 34 | `nice` | TODO M3.5 |
-| 36 | `sync` | TODO M6.1（缓存刷新在 M2.4 已有） |
+| 36 | `sync` | TODO M6.1（`block_cache_sync_all()` 就是它要调用的刷新 —— `docs/block.md` §7） |
 | 37 | `kill` | WIP M1.3 → DONE M3.5：目前是五位掩码；必须接受真正的信号编号（M3.2）并支持进程组（M3.5） |
 | 39 | `mkdir` | DONE（M2.2） |
 | 40 | `rmdir` | DONE（M2.2：`unlink` 加 `AT_REMOVEDIR` 0x200） |
@@ -193,7 +193,7 @@ linur 有而 0.11 没有的调用：`getcwd` 17、`rename` 38（0.11 的编号 3
 | 条目 | Linux 0.11 | linur 目标 | 状态 |
 |---|---|---|---|
 | 配置 | Makefile 加 `config.h` | `config/<board>.toml` → 生成的常量 | DELTA F8, TODO M5.1 |
-| 测试套件 | 源码树里没有 | `make verify` + 宿主机测试 + 用户态套件 | DONE（M2.1 新增 13 项实验回归测试；M2.2 新增 8 个 VFS 程序；M2.3 新增 `perm_test`、`dev_test` 与 `mount_test` —— 共 75 项，`verify/report.txt`） |
+| 测试套件 | 源码树里没有 | `make verify` + 宿主机测试 + 用户态套件 | DONE（M2.1 新增 13 项实验回归测试；M2.2 新增 8 个 VFS 程序；M2.3 新增 `perm_test`、`dev_test` 与 `mount_test`；M2.4 新增 `disk_stress_test`，共 76 项，另有四组宿主机测试用例（延迟写、缓存命中、超过 64 块的容量、块回收）—— `verify/report.txt`） |
 | CI | 无 | 每个里程碑门禁，两种架构 | WIP M1.4 → DONE M5.4（自 M1.5 起按架构的能力矩阵：riscv64 完整套件、x86_64 冒烟路径（`docs/x86_64-smoke.md`）、x86_64 仅编译检查 —— `verify/report.json`；x86_64 的完整套件在 M5.4） |
 | 对齐证据 | — | 本文件，在每个门禁处更新 | WIP → DONE M6.4 |
 

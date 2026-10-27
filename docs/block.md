@@ -26,8 +26,10 @@ partition tables and multiple devices (v1.0 has neither).
 
 QEMU `virt` exposes the block drive as a **legacy (version 1)** virtio-MMIO
 device at `0x1000_1000`, already in the board's MMIO list. This is measured, not
-assumed: the retired `virtio-drivers` crate accepts only `version == 1` and boots
-(`docs/block.md` records the probe used to confirm it), and QEMU's virtio-mmio
+assumed: probing the slot on this host reports `magic 0x74726976, version 1,
+device id 2, queue_num_max 1024, blk_size 512, capacity 32768` sectors
+(`notes/m24.md` pitfall 1 has the probe and its output), the retired
+`virtio-drivers` crate accepted only `version == 1`, and QEMU's virtio-mmio
 presents the legacy register interface unless the machine is told otherwise.
 
 The registers the driver touches (legacy offsets, 32-bit, volatile):
@@ -37,8 +39,8 @@ The registers the driver touches (legacy offsets, 32-bit, volatile):
 | 0x000 | `MagicValue` | must read 0x7472_6976 |
 | 0x004 | `Version` | must read 1 (legacy) |
 | 0x008 | `DeviceID` | must read 2 (block) |
-| 0x010/0x014 | `DeviceFeatures` + `Sel` | read once; nothing is negotiated |
-| 0x020/0x024 | `DriverFeatures` + `Sel` | write 0: no optional feature is needed |
+| 0x010/0x014 | `DeviceFeatures` + `Sel` | not read: no optional feature is wanted |
+| 0x020/0x024 | `DriverFeatures` + `Sel` | write 0: nothing is accepted |
 | 0x028 | `GuestPageSize` | 4096 (legacy only) |
 | 0x030 | `QueueSel` | 0 |
 | 0x034 | `QueueNumMax` | read, must be at least `QUEUE_SIZE` |
@@ -50,8 +52,8 @@ The registers the driver touches (legacy offsets, 32-bit, volatile):
 | 0x100 | config: `capacity` `u64` | device size in 512-byte sectors |
 | 0x114 | config: `blk_size` `u32` | must read 512 |
 
-Init order: status 0 (reset) → `ACKNOWLEDGE` → `ACKNOWLEDGE|DRIVER` → feature
-words read and answered with 0 → `GuestPageSize` 4096 → queue 0 configured
+Init order: status 0 (reset) → `ACKNOWLEDGE` → `ACKNOWLEDGE|DRIVER` → driver
+features 0 → `GuestPageSize` 4096 → queue 0 configured
 (`QueueNum`, `QueueAlign`, `QueuePFN`) → `...|FEATURES_OK|DRIVER_OK`. The driver
 probes the slot at construction and panics when the magic, version or device id do
 not match: there is no fallback filesystem, so a missing disk is a boot failure,
@@ -155,7 +157,9 @@ impl<T> SpinMutex<T> {
 * **Flush points.** `block_cache_sync_all()` is public. The host packer calls it
   before exiting (an image that is not flushed is not an image), the host test
   calls it where it wants a device write, and the `sync` syscall of M6.1 will call
-  it. There is no periodic flusher before M3.5/M6.1.
+  it — the "`sync`" of the M2.4 plan row is this flush, while the syscall number
+  itself stays M6.1 (`spec/03` row 36). There is no periodic flusher before
+  M3.5/M6.1.
 
 ## 8. Directory block reclamation
 
@@ -180,18 +184,23 @@ boundary and shrinks again leaks a block. M2.4 fixes it:
 is process-global, so one test owns it) grows these cases. `BlockFile` counts
 device reads and writes under `#[cfg(test)]`.
 
-* **Delayed write:** after a baseline, create a file and write it; the device
-  write count does not move; `block_cache_sync_all()` moves it by at least the
-  number of blocks the file dirtied.
+* **Delayed write:** create and size the file *before* the baseline, then
+  overwrite the same resident blocks; the device read and write counts do not
+  move until `block_cache_sync_all()`, which moves the write count by at least the
+  four dirtied blocks. Creating a file after the baseline would dirty its parent
+  and can evict an unrelated dirty block from a full cache (`notes/m24.md`
+  pitfall 7).
 * **Hash hits:** read a file, record the device read count, read it again; the
   second pass issues no device reads.
 * **Capacity:** write more than `BLOCK_CACHE_SIZE` blocks across files, flush,
   read everything back and compare (eviction, write-back and reload), including a
   file that spans the direct/indirect boundaries.
-* **Reclamation:** fill a directory past one 512-byte block of entries, remove
-  entries until it shrinks, and assert `free_data_blocks()` grew by the freed
-  block; the same for a shrink that crosses the indirect1 boundary is covered by
-  the existing big-file cases and a directory of its own if cheap.
+* **Reclamation:** fill a directory past one 512-byte block of entries (52
+  entries, four data blocks), remove entries until it shrinks to one block, and
+  assert `free_data_blocks()` grew by the three freed blocks; then a second case
+  with 2502 entries (160 blocks, i.e. indirect2 plus its indirect1 table) shrunk
+  back under the 154-block indirect1 boundary, where the removal must free three
+  data blocks, the table and both indirect blocks (five in total).
 * **Metadata:** the M2.3 cases stay (mode/uid/gid/dev round-trip).
 
 ## 10. Kernel tests

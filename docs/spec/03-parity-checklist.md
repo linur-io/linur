@@ -73,7 +73,7 @@ Every row must end as exactly one of:
 | paths | component walk, no MAX_PATH check | walker with dot, dotdot, cwd | DONE (M2.2: `.`/`..` through real entries; 27-byte components, 4096-byte paths) |
 | name length | 14 characters | long names | DELTA F11 |
 | on-disk format | MINIX v1, 1 KiB blocks, 32-byte inodes, 7+1+1 zones | own format on the easy-fs lineage | DELTA F12 (v3: `mode`/`uid`/`gid`, 26 direct entries, device number in `direct[0]` — `docs/perm.md` §3) |
-| buffer cache | hash queue + free list, read-ahead, elevator | hash queues, delayed write, `sync` | TODO M2.4 |
+| buffer cache | hash queue + free list, read-ahead, elevator | hash queues, delayed write, `sync` | DONE (M2.4: 64 caches in 16 hash buckets, free-list eviction that skips pinned caches, delayed write flushed on eviction or `block_cache_sync_all()`; the `sync` syscall stays M6.1 — `docs/block.md` §7) |
 | mounts | table of 8, MINIX only, no fs-type argument | mount table, at least one filesystem | DONE (M2.3: the mount table in `os/src/fs/mount.rs` holds one filesystem; `mount()`/`umount()` stay M6.1 — `docs/perm.md` §5) |
 | permissions | owner/group/other, `suser()`, `chmod`, `chown`, `umask` | same | DONE (M2.3: mode/uid/gid on disk, `umask`, the `permission()` predicate at the 0.11 call sites — `docs/perm.md` §2/§6) |
 | fd table | `NR_OPEN` 20, global file table of 64 | no artificial limit | DELTA F4 (per-descriptor `CLOEXEC` since M2.2) |
@@ -92,7 +92,7 @@ Every row must end as exactly one of:
 | serial | 8250, fixed 2400 bps, two ports | own UART driver, usable speed | TODO M3.1 |
 | timer | 8253/8254, HZ 100, LATCH 11931 | same tick rate; own PIT/HPET driver | TODO M5.4 |
 | interrupt controller | 8259 master + slave, explicit EOI | own PIC or APIC handling | TODO M5.4 |
-| block device | floppy + ST-506/ATA, CHS, request elevator | own driver with a request queue | TODO M2.4 |
+| block device | floppy + ST-506/ATA, CHS, request elevator | own driver with a request queue | DONE (M2.4: own legacy virtio-MMIO driver, a split-virtqueue request queue of 8 descriptors, DMA in a static area — `docs/block.md` §2–§4) |
 | floppy | full FDC + DMA driver | absent | DEFER: museum hardware, no user value |
 | ramdisk | optional, off by default | absent for v1.0 | DEFER |
 | device layer | major/minor dispatch tables | same shape | TODO M3.1 |
@@ -145,7 +145,7 @@ Every row must end as exactly one of:
 | 30 | `utime` | TODO M3.5 |
 | 33 | `access` | DONE (M2.3: the requested bits; `F_OK` checks existence; a path that does not resolve is `EACCES`, as in 0.11) |
 | 34 | `nice` | TODO M3.5 |
-| 36 | `sync` | TODO M6.1 (cache flush exists at M2.4) |
+| 36 | `sync` | TODO M6.1 (`block_cache_sync_all()` is the flush it will call — `docs/block.md` §7) |
 | 37 | `kill` | WIP M1.3 → DONE M3.5: today a five-bit mask; must take real signal numbers (M3.2) and support groups (M3.5) |
 | 39 | `mkdir` | DONE (M2.2) |
 | 40 | `rmdir` | DONE (M2.2: `unlink` with `AT_REMOVEDIR` 0x200) |
@@ -192,7 +192,7 @@ Calls linur has that 0.11 does not: `getcwd` 17, `rename` 38 (0.11's number 38 i
 | item | Linux 0.11 | linur target | status |
 |---|---|---|---|
 | configuration | Makefile plus `config.h` | `config/<board>.toml` → generated consts | DELTA F8, TODO M5.1 |
-| test suite | none in tree | `make verify` + host tests + userland suite | DONE (M2.1 adds the 13 lab regression tests; M2.2 adds the 8 VFS programs; M2.3 adds `perm_test`, `dev_test` and `mount_test` — 75 in total, `verify/report.txt`) |
+| test suite | none in tree | `make verify` + host tests + userland suite | DONE (M2.1 adds the 13 lab regression tests; M2.2 adds the 8 VFS programs; M2.3 adds `perm_test`, `dev_test` and `mount_test`; M2.4 adds `disk_stress_test` for 76 in total, plus four host-test case groups (delayed write, cache hits, >64-block capacity, reclamation) — `verify/report.txt`) |
 | CI | none | every milestone gate, both architectures | WIP M1.4 → DONE M5.4 (per-architecture capability matrix from M1.5: riscv64 full suite, x86_64 smoke path (`docs/x86_64-smoke.md`), x86_64 compile-only check — `verify/report.json`; the x86_64 full suite is M5.4) |
 | parity evidence | — | this file, updated at each gate | WIP → DONE M6.4 |
 

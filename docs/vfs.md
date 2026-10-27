@@ -1,11 +1,12 @@
-# linur — the VFS with paths (M2.2, updated at M2.3)
+# linur — the VFS with paths (M2.2, updated at M2.4)
 
-Status: interface contract for M2.2, updated by M2.3. `docs/perm.md` is the M2.3
-contract and is authoritative for the v3 inode layout, the permission checks and the
-`/dev` skeleton. Read with `spec/02` (M2.2/M2.3), `spec/01` §4/§5,
-`docs/errors.md` and `docs/reland.md`. M2.2 replaces the single-name lookup over
-one global inode with superblock, dentry and inode objects, a path walker, a
-per-process cwd, the directory operations, Linux open flags, fd `CLOEXEC`, and
+Status: interface contract for M2.2, updated by M2.3 and M2.4. `docs/perm.md` is
+the M2.3 contract (v3 inode layout, permission checks, `/dev` skeleton) and
+`docs/block.md` the M2.4 one (block driver, buffer cache, directory-block
+reclamation). Read with `spec/02` (M2.2–M2.4), `spec/01` §4/§5, `docs/errors.md`
+and `docs/reland.md`. M2.2 replaces the single-name lookup over one global inode
+with superblock, dentry and inode objects, a path walker, a per-process cwd, the
+directory operations, Linux open flags, fd `CLOEXEC`, and
 `stat`/`fstat`/`lseek`/hard links (link/unlink/nlink moved here from M2.1).
 
 ## 1. Scope
@@ -16,11 +17,12 @@ Linux-exact `open` flags; fd semantics including `CLOEXEC`; `stat`, `fstat`,
 `lseek`; hard-link counts (`nlink`) on disk. M2.3 adds the inode metadata
 (`mode`/`uid`/`gid`, device number), the permission checks,
 `chmod`/`chown`/`umask`/`access`/`mknod`, a mount table holding one filesystem
-and the `/dev` skeleton.
+and the `/dev` skeleton. M2.4 adds the block layer below all of it: our own
+virtio-blk driver and the hash-queue buffer cache with delayed write.
 
 Out: `mount()`/`umount()` and `chroot` (M6.1); the device table and the real
 devices (M3.1/M6.2); timestamps (M3.5); symlinks (DEFER); pipe SIGPIPE (M6.2); a
-dentry cache and the real buffer cache (M2.4); the block driver (M2.4).
+dentry cache (not scheduled).
 
 ## 2. On-disk format v3 (easy-fs)
 
@@ -124,13 +126,14 @@ Rules these methods must keep:
   own subtree (walk `new_dir`'s `..` chain) is `InvalidName`. Renaming a name onto
   another hard link of the same inode succeeds and changes nothing. Moving a
   directory rewrites its `..` entry and adjusts both parents' `nlink`.
-* Known limitation, inherited from the tutorial filesystem: removing directory
-  entries shrinks `size` but does not return the directory's data blocks to the
-  bitmap, so a directory that grows past a block boundary and shrinks again leaks
-  that block. The buffer-cache work (M2.4) owns the fix; M2.2's tests never cross
-  the boundary.
+* Removing directory entries returns the data blocks the smaller size no longer
+  covers to the bitmap (`DiskInode::shrink_size`, called by `remove` and
+  `rename`), so a directory's `size` and its block count move together in both
+  directions. This closes the M2.2 limitation (`docs/block.md` §8).
 * `truncate` frees the data blocks and sets size 0.
-* Metadata operations keep the current `block_cache_sync_all()` behaviour.
+* Filesystem mutators do not flush: a dirty cache reaches the device when it is
+  evicted or when `block_cache_sync_all()` runs — the flush the M6.1 `sync` call
+  will use (`docs/block.md` §7).
 * The old `create(name)`, `ls()`, `clear()`, `link/unlink(name)` and `nlink()`
   root-only helpers are replaced by the API above; nothing outside easy-fs may
   call them afterwards.
@@ -356,15 +359,18 @@ Added to `user/src/bin` and to `usertests.rs` (all success unless noted):
 closed by `exec`, a plain one survives). `cloexec_child` is spawned by
 `cloexec_test`, never run standalone. The 64 existing tests stay green; the gate
 count grows by the new suite members. M2.3 adds `perm_test`, `dev_test` and
-`mount_test` (`docs/perm.md` §11) for 75.
+`mount_test` (`docs/perm.md` §11) for 75, and M2.4 adds `disk_stress_test`
+(`docs/block.md` §10) for 76.
 
 ## 13. Deliberately not in the VFS yet
 
 Permissions, modes, device nodes and the mount table left this section in M2.3
-(`docs/perm.md`): the checks, `chmod`/`chown`/`umask`/`access`/`mknod`, the
-one-filesystem mount table in `os/src/fs/mount.rs` and the `/dev` skeleton are all
-in. Still out: `mount()`/`umount()` and per-inode superblock back-pointers (M6.1),
-a dentry cache (M2.4), symlinks (DEFER). The `Dentry` shape did not change; the
+(`docs/perm.md`), and the buffer cache and the block driver in M2.4
+(`docs/block.md`): the checks, `chmod`/`chown`/`umask`/`access`/`mknod`, the
+one-filesystem mount table in `os/src/fs/mount.rs`, the `/dev` skeleton, the
+hash-queue cache with delayed write and the own virtio-blk driver are all in. Still
+out: `mount()`/`umount()` and per-inode superblock back-pointers (M6.1), a dentry
+cache (not scheduled), symlinks (DEFER). The `Dentry` shape did not change; the
 walker still never crosses a mount point.
 
 ## 14. User library API

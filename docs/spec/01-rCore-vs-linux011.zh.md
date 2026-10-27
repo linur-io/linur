@@ -44,13 +44,13 @@
 | **VFS** | 完全没有操作向量：`sys_read`/`sys_write` 按 inode 的模式位分发到 `rw_char`/`block_read`/`file_read`/`read_pipe`；`m_inode`/`file`/`super_block`/`buffer_head`；`NR_OPEN` 20、`NR_INODE` 32、`NR_FILE` 64、`NR_SUPER` 8、`NR_HASH` 307 | `trait File {readable, writable, read, write}` + `OSInode`/`Stdin`/`Stdout`/`Pipe`；偏移按每个打开文件计；只有一个全局根 inode；没有 dentry/inode/superblock 对象，没有挂载表 | 真正的 VFS 对象 + 路径解析器 + 挂载表 |
 | **路径与文件名** | 直接从用户内存里逐分量遍历；**文件名 14 个字符**；不检查 MAX_PATH；`.`/`..` 是真实目录项；结尾的斜杠表示目录 | 在根目录里查一个名字；**没有 `/`，没有 `.`，没有 `..`，没有 cwd，没有挂载**；名字 28 字节（easy-fs） | 目录、`.`/`..`、cwd、`chdir`/`getcwd`、长文件名 |
 | **磁盘文件系统** | 只有 MINIX v1：1024 字节块、32 字节 inode、16 字节目录项、7 个直接 + 1 个一级 + 1 个二级间接区、超级块魔数 0x137F；根设备写死在引导扇区里 | easy-fs：512 字节块、28 字节名字 + u32 inode 号、28 个直接 + indirect1 + indirect2，没有权限/uid/gid/时间戳/nlink | 定格式（第 2/3 轮）：延续 easy-fs 的源流，还是采用兼容 MINIX v1 的布局 |
-| **缓冲区缓存** | 描述符放在 `&end`，数据从 `buffer_memory_end` 向下增长（跳过 0xA0000–0x100000 的空洞）；约数千个 1 KiB 缓冲区；**哈希队列（307）+ 空闲链表**；`bread`/`breada`（预读）/`bread_page`；`ll_rw_block` → `make_request` → 电梯调度（`NR_REQUEST` 32，优先处理读，每次请求 2 个扇区） | easy-fs 有一个 **16 块的写回缓存**，FIFO 淘汰，当每个块都被钉住时会 `panic!`，而且每次写都会刷掉整个缓存 | 真正的缓存：哈希队列、延迟写、按 inode/页的缓存 |
+| **缓冲区缓存** | 描述符放在 `&end`，数据从 `buffer_memory_end` 向下增长（跳过 0xA0000–0x100000 的空洞）；约数千个 1 KiB 缓冲区；**哈希队列（307）+ 空闲链表**；`bread`/`breada`（预读）/`bread_page`；`ll_rw_block` → `make_request` → 电梯调度（`NR_REQUEST` 32，优先处理读，每次请求 2 个扇区） | 16 个哈希桶里共 64 个写回缓存；未命中时淘汰该桶里最老且未被钉住的缓存（再按顺序找后续桶），脏缓存只在被淘汰或调用 `block_cache_sync_all()` 时落盘 | 供文件页使用的页缓存（M4.2） |
 | **权限** | `permission(inode, mask)`，支持 owner/group/other 以及 `suser()`；`chmod`/`chown`/`access`/`umask`；uid/gid/euid/egid/suid/sgid 字段 | **完全没有** —— 磁盘上没有 uid/gid/mode，不做权限检查 | mode + 属主 + umask + chmod/chown |
 | **管道** | pipe-inode，一页（4095 字节容量），读端/写端在 `i_wait` 上睡眠，没有读端时发 **SIGPIPE** | 32 字节环，阻塞式，所有写端关闭时 EOF，**不跟踪读端 → 没有 EPIPE/SIGPIPE**；向已被放弃的管道写入会永久阻塞 | POSIX 管道语义 |
 | **控制台 / tty** | VGA/CGA/MDA 文本控制台 80x25，带完整的 ANSI 解析器和蜂鸣器；`tty_table[3]` = 控制台 + COM1 + COM2；`copy_to_cooked` 支持 ICANON/ECHO/ISIG；^C→SIGINT，^\\→SIGQUIT，**^Z 什么都不做**（`TSTPMASK` 定义了但从未接线）；1024 字节队列 | 只有 SBI `putchar`/`getchar`；stdin 的 `read` **断言 len == 1**（`read(0, buf, n>1)` 会 panic）；没有 tty，没有线路规程，没有回显，没有规范模式，没有作业控制 | tty 层 + 线路规程；控制台设备 |
 | **键盘** | `keyboard.S`：IRQ1，扫描码集 1 的映射，shift/caps/ctrl/alt，F1–F12，LED，ctrl-alt-del；默认布局 KBD_FINNISH | 没有 | PS/2 驱动 |
 | **中断** | 8259 主片 + 从片，按设备解除 IRQ 屏蔽，EOI；**中断驱动**的块 I/O，带请求队列 | 没有：定时器走 SBI，块 I/O 是**轮询**的，没有 PLIC，完全没有中断驱动的 I/O；S 模式的 trap 只要不是预期的就会 panic | PIC/APIC + IRQ 框架 + DMA |
-| **块设备** | 软盘（FDC + DMA）和 ST-506/ATA（0x1f0–0x1f7，CHS，MAX_HD 2），可选的 ramdisk（默认关闭）；启动时读分区表 | 只有一个驱动：通过 `virtio-drivers` crate 访问 0x1000_1000 处的 virtio-MMIO，轮询，DMA 页帧**永久泄漏** | 自建块驱动 + 请求层 |
+| **块设备** | 软盘（FDC + DMA）和 ST-506/ATA（0x1f0–0x1f7，CHS，MAX_HD 2），可选的 ramdisk（默认关闭）；启动时读分区表 | 自建的 legacy virtio-MMIO 驱动位于 0x1000_1000：split virtqueue 请求队列，轮询，DMA 放在内核镜像的静态区 —— 不申请页帧，也就不会泄漏 | x86_64 ATA 驱动（M5.4） |
 | **字符设备** | `/dev/null`，真正的 `/dev/port`（在 64 KiB 上做 inb/outb），`/dev/mem`/`/dev/kmem`/`/dev/ram` 全部返回 `-EIO`；按主设备号分派的表 | 没有设备节点，没有 `/dev`，没有 `ioctl`，没有 `mknod` | `/dev` + 主/次设备号分派 |
 | **配置** | `Makefile` + `config.h`（`RAMDISK` 被注释掉；键盘布局 KBD_FINNISH 与 KBD_US/GR/FR） | `config.rs` 里硬编码的 `const`；没有 feature，没有 Kconfig，没有构建期配置 | `config/<board>.toml` → 生成的常量（D6） |
 | **测试 / CI** | 源码树里没有（实验课另外接上 `testlab2.c` 之类） | 没有 CI，没有 `test` 目标，只有一个宿主机测试（`easy-fs-fuse::efs_test`，通过）；`make run TEST=1` 是交互式的，但**确实**会返回 QEMU 退出码 0 / 255（实测）；55 个应用里有 16 个从未被跑到；`usertests` 只是碰巧通过（一个缺失的应用被算作预期失败） | `make verify` 门禁 + 真正的矩阵 |
@@ -78,7 +78,7 @@
 | F3 | 用现代分页（SV39 / x86_64 4 级页表），而不是 0.11 的分段+分页混合 | 0.11 的 64 MiB 窗口和 LDT 教不了更多东西，代价却很大 |
 | F4 | 没有 16 MiB 内存上限，没有 64 任务数限制 | 人为限制算不上特性 |
 | F5 | 从 rCore **保留**线程 + 同步原语 + 死锁检测 | 0.11 完全没有；这是 linur 唯一领先的地方 |
-| F6 | **目前**用 virtio-MMIO，而不是 ATA/软盘；以后换成自己的驱动 | QEMU 里的软盘 DMA 是老古董；计划把 ATA 驱动作为上真实硬件的路径 |
+| F6 | 用 virtio-MMIO 而不是 ATA/软盘；自 M2.4 起是自己的驱动，ATA 仍是上真实硬件的路径（M5.4） | QEMU 里的软盘 DMA 是老古董；计划把 ATA 驱动作为上真实硬件的路径 |
 | F7 | 保留 HZ 100；计划加墙上时钟 RTC | 0.11 只读一次 RTC，所以时钟会漂移；我们保留 tick，但把时钟修好 |
 | F8 | 配置由 TOML 生成，而不是 `config.h` | D6 |
 | F9 | 不带 0.11 原版用户态，也不带 MINIX 镜像 | L3 是更靠后的可选阶段 |
@@ -98,7 +98,7 @@
 6. **`read(0, buf, n>1)` 会 panic**（`fs/stdio.rs` 里的 `assert_eq!(user_buf.len(), 1)`）。
 7. **向已被放弃的管道写入会永久阻塞**（不跟踪读端，没有 EPIPE/SIGPIPE）。
 8. **`fork`/`exec` 断言只有一个线程**，所以多线程进程无法 fork。
-9. **Tier-0 依赖违规**：`xmas-elf`（ELF 解析）、`buddy_system_allocator`（内核堆）、钉在某个 git rev 上的 `virtio-drivers`、`sbi-rt`，外加随仓库携带的 RustSBI 二进制。
+9. **Tier-0 依赖违规**：`xmas-elf`（ELF 解析）、`buddy_system_allocator`（内核堆）、`sbi-rt`，外加随仓库携带的 RustSBI 二进制。钉在某个 git rev 上的 `virtio-drivers` 曾在列，M2.4 用自己的块驱动替换了它。
 10. **实验特性已经从 HEAD 中消失**：`mmap`/`munmap`/`sbrk`（`7709ba3`）、`sys_trace`（`851e377`）、`spawn`（`c505a09`）、stride + `setprio`（`2a242b5`）、`link`/`unlink`/`fstat`（`c82eb2d`）。它们可以作为参考 diff 找回（约 1,500 行，含各自的测试程序，这些程序值得留作测试）。
 
 ## 7. linur 领先 0.11 的地方
