@@ -102,7 +102,9 @@ when M5.4 links an x86_64 kernel, the same build script produces the object for
 ## 6. The submodule pin
 
 `alloc/` is a submodule of `linur-io/alloc` at the repository root, pinned to tag
-`v0.1.0`. `.gitmodules` uses the **HTTPS** URL so that CI's `actions/checkout` with
+`v0.1.1` (the first bump was of this very kind: v0.1.0 → v0.1.1 defaulted the
+module's `Makefile` to clang after its CI tripped over make's built-in `CC=cc`).
+`.gitmodules` uses the **HTTPS** URL so that CI's `actions/checkout` with
 `submodules: recursive` needs no SSH key; the maintainer's checkout still pushes over
 SSH from the submodule's own remote.
 

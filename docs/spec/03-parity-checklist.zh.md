@@ -32,7 +32,7 @@
 
 | 条目 | Linux 0.11 | linur 目标 | 状态 |
 |---|---|---|---|
-| 页帧分配器 | `mem_map[]` 字节数组，反向扫描 | 自有的分配器，用 C 编写（D8） | DONE M2.6（自有的 C 侧 refcount 字节图，反向扫描，按板级 RAM 窗口只占 32 KiB —— `linur-io/alloc` @ v0.1.0，`docs/alloc.md`；内核堆与用户堆为自建 Rust free list；`make verify` 77/77） |
+| 页帧分配器 | `mem_map[]` 字节数组，反向扫描 | 自有的分配器，用 C 编写（D8） | DONE M2.6（自有的 C 侧 refcount 字节图，反向扫描，按板级 RAM 窗口只占 32 KiB —— `linur-io/alloc` @ v0.1.1，`docs/alloc.md`；内核堆与用户堆为自建 Rust free list；`make verify` 77/77） |
 | 地址转换 | 分段 + 分页，每个任务一个 LDT，64 MiB 窗口 | 按架构的页表式虚拟内存 | DELTA F3 |
 | 写时复制（COW） | `copy_page_tables` 清除写位；`un_wp_page` | COW 的 `fork` | TODO M4.1 |
 | 按需分页 | `do_no_page`，从可执行文件取页 | 按需分页 + 页缓存 | TODO M4.2 |
