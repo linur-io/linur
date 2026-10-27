@@ -11,11 +11,11 @@ publish = false
 [dependencies]
 riscv = { version = "0.16", features = ["s-mode"] }
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
-buddy_system_allocator = "0.6"
 bitflags = "1.2.1"
 easy-fs = { path = "../easy-fs" }
 elf = { path = "../elf" }
 hal = { path = "../hal" }
+heap = { path = "../heap" }
 sbi-rt = { version = "0.0.2", features = ["legacy"] }
 
 [profile.release]

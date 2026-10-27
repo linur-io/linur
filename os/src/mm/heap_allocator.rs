@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::config::KERNEL_HEAP_SIZE;
-use buddy_system_allocator::LockedHeap;
 use core::ptr::addr_of_mut;
+use heap::LockedHeap;
 
 #[global_allocator]
-static HEAP_ALLOCATOR: LockedHeap = LockedHeap::empty();
+static HEAP: LockedHeap = LockedHeap::empty();
 
 /// heap space ([u8; KERNEL_HEAP_SIZE])
 static mut HEAP_SPACE: [u8; KERNEL_HEAP_SIZE] = [0; KERNEL_HEAP_SIZE];
 
 pub fn init_heap() {
     unsafe {
-        HEAP_ALLOCATOR
-            .lock()
-            .init(addr_of_mut!(HEAP_SPACE) as usize, KERNEL_HEAP_SIZE);
+        HEAP.init(addr_of_mut!(HEAP_SPACE) as usize, KERNEL_HEAP_SIZE);
     }
 }
 

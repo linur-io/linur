@@ -10,22 +10,23 @@
 #            in the graph to be listed.
 #   Tier 1 — permanently allowed: the riscv / x86_64 architecture wrappers, bitflags,
 #            cfg-if.
-#   Tier 2 — temporary, each with a removal step in DEPENDENCIES.md: spin (now only
-#            inside buddy_system_allocator, M2.6), buddy_system_allocator (M2.6),
-#            sbi-rt (M5.5), the vendored bootloader/rustsbi-qemu.bin (M5.5), and
-#            lazy_static, whose removal step is an open D7 gap awaiting an owner
-#            decision. log, virtio-drivers and volatile left the graph with our own
-#            block driver at M2.4, and xmas-elf with our own ELF parser at M2.5; all
+#   Tier 2 — temporary, each with a removal step in DEPENDENCIES.md: sbi-rt (M5.5),
+#            the vendored bootloader/rustsbi-qemu.bin (M5.5), and lazy_static, whose
+#            removal step is an open D7 gap awaiting an owner decision. log,
+#            virtio-drivers and volatile left the graph with our own block driver at
+#            M2.4, xmas-elf with our own ELF parser at M2.5, and buddy_system_allocator
+#            (together with spin 0.7.2, its only user) with our own heap at M2.6; all
 #            are now banned outright.
 #
 # Enforcement lands in M1.4's CI, which runs `cargo deny check` after `make lint` and
 # before `make verify`; the local `make lint` covers fmt and clippy only, so
 # cargo-deny stays a CI prerequisite (it needs the advisory database). There is no
 # Cargo workspace yet (the split is M5.2), so the check runs once per manifest: os,
-# user, easy-fs, elf. easy-fs-fuse is host-only tooling outside the D7 claim and is
-# deliberately not a target — its clap/rand closure is not ledgered here.
+# user, easy-fs, elf, hal, x86-smoke and heap. easy-fs-fuse is host-only tooling
+# outside the D7 claim and is deliberately not a target — its clap/rand closure is not
+# ledgered here.
 #
-# Checked with cargo-deny 0.20.2 on the three manifests: licenses, bans, sources and
+# Checked with cargo-deny 0.20.2 on those seven manifests: licenses, bans, sources and
 # advisories all pass. The advisory database was cloned into a writable CARGO_HOME
 # because this host's ~/.cargo is read-only; CI (M1.4) owns the permanent run.
 
@@ -38,7 +39,7 @@
 allow = [
     "GPL-3.0-only",  # our own crates, and the derived work as a whole
     "Apache-2.0",    # riscv, riscv-*, spin, syn, proc-macro2, quote, ...
-    "MIT",           # buddy_system_allocator, spin, and the dual-licensed set above
+    "MIT",           # spin, syn, proc-macro2, quote, and the dual-licensed set above
     "MulanPSL-2.0",  # sbi-rt and sbi-spec: "MulanPSL-2.0 OR MIT"
     "Unicode-3.0",   # unicode-ident: "(MIT OR Apache-2.0) AND Unicode-3.0"
 ]
@@ -69,6 +70,8 @@ allow = [
     "x86-smoke",
     # M2.5: our own ELF parser.
     "elf",
+    # M2.6: our own kernel and user heap.
+    "heap",
     # Tier 1 — permanently allowed.
     "bitflags",
     "critical-section",
@@ -83,7 +86,6 @@ allow = [
     "syn",
     "unicode-ident",
     # Tier 2 — temporary, each with a removal step in DEPENDENCIES.md.
-    "buddy_system_allocator",
     "lazy_static",
     "sbi-rt",
     "sbi-spec",
@@ -91,8 +93,15 @@ allow = [
 ]
 # Crates whose Tier-2 removal has landed. A retired crate is banned outright so that
 # it cannot silently return: M2.4 retired the block driver and the log facade, M2.5
-# the ELF parser.
-deny = ["log", "virtio-drivers", "volatile", "xmas-elf", "zero"]
+# the ELF parser, M2.6 the heap allocator.
+deny = [
+    "buddy_system_allocator",
+    "log",
+    "virtio-drivers",
+    "volatile",
+    "xmas-elf",
+    "zero",
+]
 
 [sources]
 unknown-registry = "deny"

@@ -9,15 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
-name = "buddy_system_allocator"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4e85e760e105b46ae0bd1236578793c6c147ae7463fe95c8350296b8bfcb830"
-dependencies = [
- "spin 0.7.2",
-]
-
-[[package]]
 name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -42,12 +33,16 @@ name = "hal"
 version = "0.1.0"
 
 [[package]]
+name = "heap"
+version = "0.1.0"
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 dependencies = [
- "spin 0.9.9",
+ "spin",
 ]
 
 [[package]]
@@ -55,10 +50,10 @@ name = "os"
 version = "0.1.0"
 dependencies = [
  "bitflags",
- "buddy_system_allocator",
  "easy-fs",
  "elf",
  "hal",
+ "heap",
  "lazy_static",
  "riscv",
  "sbi-rt",
@@ -135,12 +130,6 @@ checksum = "6d4027cf9bb591a9fd0fc0e283be6165c5abe96cb73e9f0e24738c227f425377"
 dependencies = [
  "static_assertions",
 ]
-
-[[package]]
-name = "spin"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9335ac53859132805f619b68dab9229ec74e45ad9c92d5edca2a80240806eb65"
 
 [[package]]
 name = "spin"

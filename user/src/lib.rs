@@ -33,8 +33,8 @@ extern crate bitflags;
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use buddy_system_allocator::LockedHeap;
 use core::ptr::addr_of_mut;
+use heap::LockedHeap;
 use syscall::*;
 
 unsafe extern "Rust" {
@@ -55,8 +55,7 @@ static HEAP: LockedHeap = LockedHeap::empty();
 #[unsafe(link_section = ".text.entry")]
 pub extern "C" fn _start(argc: usize, argv: usize, envp: usize) -> ! {
     unsafe {
-        HEAP.lock()
-            .init(addr_of_mut!(HEAP_SPACE) as usize, USER_HEAP_SIZE);
+        HEAP.init(addr_of_mut!(HEAP_SPACE) as usize, USER_HEAP_SIZE);
     }
     let args = unsafe { strings(argv, Some(argc)) };
     let envs = unsafe { strings(envp, None) };

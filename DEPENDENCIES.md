@@ -1,7 +1,7 @@
 # Dependency ledger
 
-One row per third-party crate in the `os`, `user`, `easy-fs`, `elf`, `hal` and
-`x86-smoke` dependency graphs — direct and transitive, including the proc-macro crates compiled
+One row per third-party crate in the `os`, `user`, `easy-fs`, `elf`, `hal`,
+`heap` and `x86-smoke` dependency graphs — direct and transitive, including the proc-macro crates compiled
 for the host while building them — with versions as pinned in the tracked
 `Cargo.lock` files. Tiers are D7 (`docs/spec/00-requirements.md` §3):
 
@@ -26,15 +26,14 @@ M1.5 smoke path is hand-written assembly plus our own code; the full port that p
 the crate in is M5.4) and `cfg-if` (reached only from host-only tooling today). The
 M1.5 crates add no third-party dependency — `hal` is dependency-free and `x86-smoke`
 depends only on `hal` — and both are our own Tier-0 crates, so `deny.toml` lists them
-in its allow set and they have no row here. `elf` (M2.5) is in the same position: a
-dependency-free Tier-0 crate of ours.
+in its allow set and they have no row here. `elf` (M2.5) and `heap` (M2.6) are in the
+same position: dependency-free Tier-0 crates of ours.
 
 ## Kernel-image graph
 
 | crate | version | purpose | tier | owner | removal |
 |---|---|---|---|---|---|
 | bitflags | 1.3.2 | `bitflags!` types for signal and open-flag sets | Tier 1 | Fuxi | — |
-| buddy_system_allocator | 0.6.0 | kernel heap and user heap allocator — **Tier-0 violation** kept from rCore | Tier 2 | Fuxi | M2.6 |
 | critical-section | 1.2.0 | critical-section abstraction required by `riscv` | Tier 1 | Fuxi | — |
 | embedded-hal | 1.0.0 | delay and serial traits required by `riscv` | Tier 1 | Fuxi | — |
 | lazy_static | 1.5.0 | global singletons, via the `spin_no_std` feature | Tier 2 | Fuxi | open — D7 gap, owner decision |
@@ -46,7 +45,6 @@ dependency-free Tier-0 crate of ours.
 | riscv-types | 0.1.0 | register and CSR types for `riscv` | Tier 1 | Fuxi | — |
 | sbi-rt | 0.0.2 | SBI calls for console output, timer and shutdown | Tier 2 | Fuxi | M5.5 |
 | sbi-spec | 0.0.4 | SBI extension constants for `sbi-rt` | Tier 2 | Fuxi | M5.5 |
-| spin | 0.7.2 | spinlock inside `buddy_system_allocator` only; our own code uses `os/src/sync/spinlock.rs` and `easy-fs/src/sync.rs` since M2.4 | Tier 2 | Fuxi | M2.6 (with the heaps) |
 | spin | 0.9.9 | spinlock inside `lazy_static`'s `spin_no_std` | Tier 2 | Fuxi | open — same D7 gap as `lazy_static` |
 | static_assertions | 1.1.0 | compile-time asserts in `sbi-spec` | Tier 2 | Fuxi | M5.5 |
 | syn | 2.0.119 | procedural-macro parsing, host-side at build time | Tier 1 | Fuxi | — |
@@ -54,10 +52,12 @@ dependency-free Tier-0 crate of ours.
 | bootloader/rustsbi-qemu.bin | RustSBI 0.3.1, 32 KiB | S-mode firmware the kernel boots under — **Tier-0 violation**; a vendored binary, not a crate, so it has no `deny.toml` entry | Tier 2 | Fuxi | M5.5 |
 
 **Checks.** `cargo deny check licenses bans sources advisories` is green for `os`,
-`user`, `easy-fs`, `elf`, `hal` and `x86-smoke` with cargo-deny 0.20.2. The graph now
-carries no advisory at all: M2.4 removed `virtio-drivers`, `volatile` and `log`, and
-M2.5 removed `xmas-elf` and its `zero` bound together with the RUSTSEC-2025-0018
-ignore the first of them carried. The license check carries no warnings either.
+`user`, `easy-fs`, `elf`, `hal`, `heap` and `x86-smoke` with cargo-deny 0.20.2. The
+graph now carries no advisory at all: M2.4 removed `virtio-drivers`, `volatile` and
+`log`; M2.5 removed `xmas-elf` and its `zero` bound together with the
+RUSTSEC-2025-0018 ignore the first of them carried; and M2.6 removed
+`buddy_system_allocator` and `spin 0.7.2`, its only user, leaving the graph's single
+`spin` (0.9.9) inside `lazy_static`. The license check carries no warnings either.
 
 ## Host-only tooling
 
