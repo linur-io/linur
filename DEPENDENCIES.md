@@ -36,8 +36,7 @@ in its allow set and they have no row here.
 | buddy_system_allocator | 0.6.0 | kernel heap and user heap allocator — **Tier-0 violation** kept from rCore | Tier 2 | Fuxi | M2.6 |
 | critical-section | 1.2.0 | critical-section abstraction required by `riscv` | Tier 1 | Fuxi | — |
 | embedded-hal | 1.0.0 | delay and serial traits required by `riscv` | Tier 1 | Fuxi | — |
-| lazy_static | 1.5.0 | global singletons, via the `spin_no_std` feature | Tier 2 | Fuxi | open — D7 gap, owner decision (proposed: retire with `log` in M1.2) |
-| log | 0.4.33 | `log` facade used only by `virtio-drivers`; our own `os/src/logging.rs` stopped using it at M1.2 | Tier 2 | Fuxi | M2.4 (leaves the graph with `virtio-drivers`; the direct `os/` dependency ended at M1.2) |
+| lazy_static | 1.5.0 | global singletons, via the `spin_no_std` feature | Tier 2 | Fuxi | open — D7 gap, owner decision |
 | pastey | 0.2.3 | `paste!` for register definitions in `riscv` | Tier 1 | Fuxi | — |
 | proc-macro2 | 1.0.107 | proc-macro plumbing, host-side at build time | Tier 1 | Fuxi | — |
 | quote | 1.0.47 | proc-macro plumbing, host-side at build time | Tier 1 | Fuxi | — |
@@ -46,13 +45,11 @@ in its allow set and they have no row here.
 | riscv-types | 0.1.0 | register and CSR types for `riscv` | Tier 1 | Fuxi | — |
 | sbi-rt | 0.0.2 | SBI calls for console output, timer and shutdown | Tier 2 | Fuxi | M5.5 |
 | sbi-spec | 0.0.4 | SBI extension constants for `sbi-rt` | Tier 2 | Fuxi | M5.5 |
-| spin | 0.7.2 | spinlock in the easy-fs block cache and in `buddy_system_allocator` | Tier 2 | Fuxi | M2.4 |
+| spin | 0.7.2 | spinlock inside `buddy_system_allocator` only; our own code uses `os/src/sync/spinlock.rs` and `easy-fs/src/sync.rs` since M2.4 | Tier 2 | Fuxi | M2.6 (with the heaps) |
 | spin | 0.9.9 | spinlock inside `lazy_static`'s `spin_no_std` | Tier 2 | Fuxi | open — same D7 gap as `lazy_static` |
 | static_assertions | 1.1.0 | compile-time asserts in `sbi-spec` | Tier 2 | Fuxi | M5.5 |
 | syn | 2.0.119 | procedural-macro parsing, host-side at build time | Tier 1 | Fuxi | — |
 | unicode-ident | 1.0.24 | identifier tables for `proc-macro2` and `syn`, host-side at build time | Tier 1 | Fuxi | — |
-| virtio-drivers | 0.1.0 (`rev 4ee80e5`) | virtio-MMIO block driver — **Tier-0 violation** | Tier 2 | Fuxi | M2.4 |
-| volatile | 0.3.0 | volatile MMIO access in `virtio-drivers` | Tier 2 | Fuxi | M2.4 |
 | xmas-elf | 0.7.0 | ELF parsing in `exec` — **Tier-0 violation** | Tier 2 | Fuxi | M2.5 |
 | zero | 0.1.3 | `Zero` trait bounds used by `xmas-elf` | Tier 2 | Fuxi | M2.5 |
 | bootloader/rustsbi-qemu.bin | RustSBI 0.3.1, 32 KiB | S-mode firmware the kernel boots under — **Tier-0 violation**; a vendored binary, not a crate, so it has no `deny.toml` entry | Tier 2 | Fuxi | M5.5 |
@@ -61,8 +58,8 @@ in its allow set and they have no row here.
 `user`, `easy-fs`, `hal` and `x86-smoke` with cargo-deny 0.20.2. The only advisory
 in the graph is RUSTSEC-2025-0018 against `xmas-elf` (out-of-bounds read on a
 malformed ELF); it is ignored in `deny.toml` until M2.5 replaces the parser, since no
-untrusted image reaches `exec` before then. `virtio-drivers` still has no `license`
-field of its own, so the license check reports it as a warning rather than an error.
+untrusted image reaches `exec` before then. M2.4 removed `virtio-drivers`, `volatile`
+and `log` from the graph, so the license check no longer carries that warning.
 
 ## Host-only tooling
 

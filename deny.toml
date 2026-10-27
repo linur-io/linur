@@ -10,12 +10,13 @@
 #            in the graph to be listed.
 #   Tier 1 — permanently allowed: the riscv / x86_64 architecture wrappers, bitflags,
 #            cfg-if.
-#   Tier 2 — temporary, each with a removal step in DEPENDENCIES.md: log (M1.2 for
-#            our own code; the crate itself leaves with virtio-drivers at M2.4),
-#            spin (M2.4), virtio-drivers (M2.4), xmas-elf (M2.5),
+#   Tier 2 — temporary, each with a removal step in DEPENDENCIES.md: spin (now only
+#            inside buddy_system_allocator, M2.6), xmas-elf (M2.5),
 #            buddy_system_allocator (M2.6), sbi-rt (M5.5), the vendored
 #            bootloader/rustsbi-qemu.bin (M5.5), and lazy_static, whose removal step
-#            is an open D7 gap awaiting an owner decision.
+#            is an open D7 gap awaiting an owner decision. log, virtio-drivers and
+#            volatile left the graph with our own block driver at M2.4 and are now
+#            banned outright.
 #
 # Enforcement lands in M1.4's CI, which runs `cargo deny check` after `make lint` and
 # before `make verify`; the local `make lint` covers fmt and clippy only, so
@@ -31,14 +32,12 @@
 [licenses]
 # GPL-3.0-only is linur itself: the derived work stays GPLv3 (spec/00 §5). An
 # unlicensed crate is reported, which is what makes the `license` field in all four
-# manifests mandatory instead of a convention. virtio-drivers still declares no
-# license of its own (it ships a LICENSE file) and is retired at M2.4; it reports as a
-# warning until then.
+# manifests mandatory instead of a convention.
 # Every string below is used by at least one crate in the kernel-image graph; none is
 # guessed.
 allow = [
     "GPL-3.0-only",  # our own crates, and the derived work as a whole
-    "Apache-2.0",    # riscv, riscv-*, log, spin, syn, proc-macro2, quote, ...
+    "Apache-2.0",    # riscv, riscv-*, spin, syn, proc-macro2, quote, ...
     "MIT",           # buddy_system_allocator, spin, and the dual-licensed set above
     "MulanPSL-2.0",  # sbi-rt and sbi-spec: "MulanPSL-2.0 OR MIT"
     "Unicode-3.0",   # unicode-ident: "(MIT OR Apache-2.0) AND Unicode-3.0"
@@ -84,30 +83,24 @@ allow = [
     # Tier 2 — temporary, each with a removal step in DEPENDENCIES.md.
     "buddy_system_allocator",
     "lazy_static",
-    # No longer used by our code since M1.2; `virtio-drivers` still pulls it in, so it
-    # cannot move to `deny` before M2.4.
-    "log",
     "sbi-rt",
     "sbi-spec",
     "spin",
-    "virtio-drivers",
-    "volatile",
     "xmas-elf",
     "zero",
 ]
-# Empty today. Add a crate here the moment its Tier-2 removal lands — log and spin
-# after M2.4, and so on down the ledger — so that it cannot silently return.
-deny = []
+# Crates whose Tier-2 removal has landed. A retired crate is banned outright so that
+# it cannot silently return: M2.4 retired the block driver and the log facade.
+deny = ["log", "virtio-drivers", "volatile"]
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# The only git dependency in the tree is virtio-drivers, which must be pinned to a
-# revision: the pin lives in os/Cargo.toml (`rev = "4ee80e5"`) and in the tracked
-# os/Cargo.lock, and `rev` is the only accepted specifier.
+# M2.4 removed the last git dependency (virtio-drivers). A future one must be pinned
+# to a revision, and `rev` is the only accepted specifier.
 required-git-spec = "rev"
-allow-git = ["https://github.com/rcore-os/virtio-drivers"]
+allow-git = []
 unused-allowed-source = "allow"
 
 [advisories]

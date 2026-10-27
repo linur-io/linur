@@ -9,6 +9,9 @@ pub const MMIO: &[(usize, usize)] = &[
     (0x1000_1000, 0x00_1000), // Virtio Block in virt machine
 ];
 
+/// The virtio-MMIO slot that carries the block drive (docs/block.md §2).
+pub const VIRTIO0: usize = 0x1000_1000;
+
 pub type BlockDeviceImpl = crate::drivers::block::VirtIOBlock;
 
 /// QEMU virt's SiFive test finisher, already mapped through `MMIO`.
